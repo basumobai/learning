@@ -42,14 +42,14 @@ jobs:
           set -euo pipefail
           ready=0
           for attempt in $(seq 1 60); do
-            if curl --silent --fail http://127.0.0.1:8080/api/v1/health >/dev/null; then
+            if curl --silent --fail http://127.0.0.1:8080/api/v1/health >/dev/null \
+              && curl --silent --fail http://127.0.0.1:3000/ >/dev/null; then
               ready=1
               break
             fi
             sleep 3
           done
           test "$ready" -eq 1
-          curl --silent --fail http://127.0.0.1:3000/ >/dev/null
           curl --silent --fail -X POST http://127.0.0.1:8080/api/v1/study/sessions \
             -H 'Content-Type: application/json' -d '{}' > /tmp/els-session.json
           python3 - <<'PY'
