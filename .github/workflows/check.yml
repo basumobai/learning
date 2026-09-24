@@ -1,0 +1,99 @@
+name: check
+on:
+  push:
+  pull_request:
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/api/go.mod
+      - run: go mod tidy
+        working-directory: services/api
+      - run: go test ./...
+        working-directory: services/api
+      - run: go build ./cmd/api
+        working-directory: services/api
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm run build
+        working-directory: apps/web
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start complete development stack
+        run: docker compose up --build -d
+      - name: Smoke test the study flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=0
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8080/api/v1/health >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+          curl --silent --fail http://127.0.0.1:3000/ >/dev/null
+          curl --silent --fail -X POST http://127.0.0.1:8080/api/v1/study/sessions \
+            -H 'Content-Type: application/json' -d '{}' > /tmp/els-session.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          session = json.loads(Path('/tmp/els-session.json').read_text())
+          assert session['question_count'] == 15
+          Path('/tmp/els-session-id').write_text(str(session['id']))
+          PY
+          session_id=$(cat /tmp/els-session-id)
+          curl --silent --fail "http://127.0.0.1:8080/api/v1/study/sessions/$session_id" > /tmp/els-questions.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          questions = json.loads(Path('/tmp/els-questions.json').read_text())['questions']
+          assert len(questions) == 15
+          assert questions[0]['type'] == 'recognition'
+          assert '适应' in questions[0]['choices']
+          Path('/tmp/els-answer.json').write_text(json.dumps({
+              'question_id': questions[0]['id'],
+              'request_id': 'integration-smoke-0001',
+              'answer': '适应',
+              'response_time_ms': 1200,
+              'used_hint': False,
+          }, ensure_ascii=False))
+          PY
+          curl --silent --fail -X POST "http://127.0.0.1:8080/api/v1/study/sessions/$session_id/answers" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/els-answer.json > /tmp/els-grade.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          assert json.loads(Path('/tmp/els-grade.json').read_text())['result'] == 'correct'
+          PY
+          curl --silent --fail -X POST "http://127.0.0.1:8080/api/v1/study/sessions/$session_id/answers" \
+            -H 'Content-Type: application/json' --data-binary @/tmp/els-answer.json > /tmp/els-replay.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          replay = json.loads(Path('/tmp/els-replay.json').read_text())
+          assert replay['result'] == 'correct' and replay['replayed']
+          PY
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v
