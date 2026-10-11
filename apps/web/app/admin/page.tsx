@@ -101,7 +101,7 @@ export default function Admin() {
   useEffect(() => {
     if (auth.allowed) load().catch((e) => setError(e.message));
   }, [auth.allowed]);
-  async function run(work: () => Promise<void>) {
+  async function run(work: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
     setError("");
@@ -115,9 +115,13 @@ export default function Admin() {
     }
   }
   async function save(path: string, body: object, message: string) {
-    await api(path, { ...body, admin_password: adminPassword });
+    const saved = await api<{ id: string | number }>(path, {
+      ...body,
+      admin_password: adminPassword,
+    });
     await load();
     setNotice(message);
+    return saved;
   }
   function editText(value: string) {
     setText(value);
@@ -187,7 +191,15 @@ export default function Admin() {
                 <button
                   key={p.id}
                   aria-pressed={provider.id === p.id}
-                  onClick={() => setProvider({ ...p, api_key: "" })}
+                  onClick={() =>
+                    setProvider({
+                      id: p.id,
+                      name: p.name,
+                      base_url: p.base_url,
+                      enabled: p.enabled,
+                      api_key: "",
+                    })
+                  }
                 >
                   {p.name}
                   {!p.enabled ? " · 停用" : ""}
@@ -199,12 +211,16 @@ export default function Admin() {
               onSubmit={(e) => {
                 e.preventDefault();
                 run(async () => {
-                  await save(
+                  const saved = await save(
                     "/admin/providers",
                     provider,
                     "服务商已保存。请添加模型并分配到权限组。",
                   );
-                  setProvider({ ...provider, api_key: "" });
+                  setProvider({
+                    ...provider,
+                    id: String(saved.id),
+                    api_key: "",
+                  });
                 });
               }}
             >
@@ -457,13 +473,14 @@ export default function Admin() {
             className="form-stack"
             onSubmit={(e) => {
               e.preventDefault();
-              run(() =>
-                save(
+              run(async () => {
+                const saved = await save(
                   "/admin/groups",
                   group,
                   "权限组已保存，新请求立即按新授权检查。",
-                ),
-              );
+                );
+                setGroup({ ...group, id: Number(saved.id) });
+              });
             }}
           >
             <label>
@@ -521,7 +538,16 @@ export default function Admin() {
                 key={u.id}
                 aria-pressed={user.id === u.id}
                 onClick={() =>
-                  setUser({ ...u, password: "", clear_mfa: false })
+                  setUser({
+                    id: u.id,
+                    username: u.username,
+                    display_name: u.display_name,
+                    role: u.role,
+                    group_id: u.group_id,
+                    disabled: u.disabled,
+                    password: "",
+                    clear_mfa: false,
+                  })
                 }
               >
                 {u.display_name} · {u.username}
@@ -534,12 +560,17 @@ export default function Admin() {
             onSubmit={(e) => {
               e.preventDefault();
               run(async () => {
-                await save(
+                const saved = await save(
                   "/admin/users",
                   user,
                   "账户已保存。新建或重置密码后，用户首次登录必须改密。",
                 );
-                setUser({ ...user, password: "", clear_mfa: false });
+                setUser({
+                  ...user,
+                  id: String(saved.id),
+                  password: "",
+                  clear_mfa: false,
+                });
               });
             }}
           >

@@ -1079,6 +1079,8 @@ a {
   color: var(--ink);
 }
 .app-topbar {
+  height: auto;
+  min-height: 68px;
   flex-wrap: wrap;
   gap: 16px;
 }
