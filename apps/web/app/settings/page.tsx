@@ -92,7 +92,7 @@ export default function Settings() {
   return (
     <main className="shell">
       <Navigation />
-      <section className="intro">
+      <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">YOUR PACE · YOUR ACCOUNT</span>
         <h1>学得稳，也用得安心。</h1>
         <p>复习设置会保存到你的账户。高目标记忆率通常需要更频繁的复习。</p>

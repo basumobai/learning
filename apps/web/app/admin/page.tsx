@@ -132,7 +132,7 @@ export default function Admin() {
   return (
     <main className="shell">
       <Navigation />
-      <section className="intro">
+      <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">CONTENT · MODELS · ACCESS</span>
         <h1>把合适的资源，交给合适的人。</h1>
         <p>

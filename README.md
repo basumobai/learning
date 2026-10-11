@@ -67,4 +67,4 @@ npm run build
 
 数据库集成测试需要 `TEST_DATABASE_URL` 指向可创建临时 schema 的 PostgreSQL；未设置时明确跳过。CI 使用 PostgreSQL 17 运行真实迁移、并发、账户隔离、权限、AI 重试、听力交卷、每日预算和撤销测试，并启动 Compose 栈执行带登录的冒烟测试。增量迁移保留已有学习数据。
 
-[AnkiDroid 对比与剩余差距](docs/ANKIDROID_COMPARISON.md) · [产品行为](docs/PRODUCT.md) · [接口](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [AI](docs/AI.md)
+[前端设计与预览](docs/FRONTEND.md) · [AnkiDroid 对比与剩余差距](docs/ANKIDROID_COMPARISON.md) · [产品行为](docs/PRODUCT.md) · [接口](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [AI](docs/AI.md)

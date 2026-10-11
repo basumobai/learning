@@ -4,6 +4,7 @@ import { api, requestID } from "../../lib/api";
 import { parsePendingAI, type PendingAI } from "../../lib/ai-state";
 import { useProtected, Navigation, Loading } from "../providers";
 import { useVoice, VoicePicker, useSpeech, AudioOutput } from "../speech";
+import { Icon, type IconName } from "../icons";
 
 type Conversation = { id: string; title: string; updated_at: string };
 type Message = {
@@ -69,6 +70,23 @@ export default function Assistant() {
     chatModels.find((m) => m.id === modelID) || chatModels[0];
   const storageKey = `els-ai-pending-v1:${auth.user?.id || ""}`;
   const selectedKey = `els-ai-current-v1:${auth.user?.id || ""}`;
+  const requestedTab = useRef<"chat" | "sentence" | "listening" | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const value = window.location.hash.slice(1);
+      if (value === "chat" || value === "sentence" || value === "listening") {
+        requestedTab.current = value;
+        setTab(value);
+        speech.stop();
+        setShowCheck(false);
+      }
+    };
+    update();
+    window.addEventListener("hashchange", update);
+    return () => window.removeEventListener("hashchange", update);
+    // The speech player is kept in refs; hash navigation must not restart audio.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   function remember(value: PendingAI | null) {
     setPending(value);
     try {
@@ -96,12 +114,13 @@ export default function Assistant() {
     setMessages(d.messages);
     current(id, "chat");
   }
-  async function loadTraining(id: string) {
+  async function loadTraining(id: string, restoring = false) {
     const d = await api<Training>(`/ai/training/${id}`);
     setLesson(d);
     setAnswers(d.questions?.map(() => -1) || []);
     setShowCheck(false);
-    setTab(d.kind);
+    if (restoring) setTab(requestedTab.current || d.kind);
+    else switchTab(d.kind);
     current(id, d.kind);
     speech.stop();
   }
@@ -122,7 +141,7 @@ export default function Assistant() {
         if (job?.path.includes("/conversations/")) {
           const id = job.path.split("/")[3];
           await loadChat(id);
-          setTab("chat");
+          setTab(requestedTab.current || "chat");
           setContent(String(job.body.content || ""));
         } else if (
           saved?.kind === "chat" &&
@@ -130,7 +149,7 @@ export default function Assistant() {
         )
           await loadChat(saved.id);
         else if (saved && h.h.some((t) => t.id === saved!.id))
-          await loadTraining(saved.id);
+          await loadTraining(saved.id, true);
         else if (h.c[0]) await loadChat(h.c[0].id);
       } catch (e) {
         if (live) setError((e as Error).message);
@@ -228,6 +247,8 @@ export default function Assistant() {
     });
   }
   function switchTab(next: "chat" | "sentence" | "listening") {
+    requestedTab.current = next;
+    window.history.replaceState(window.history.state, "", `#${next}`);
     setTab(next);
     speech.stop();
     setShowCheck(false);
@@ -237,7 +258,7 @@ export default function Assistant() {
   return (
     <main className="shell">
       <Navigation />
-      <section className="intro">
+      <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">UNDERSTAND · LISTEN · EXPRESS</span>
         <h1>让“认识”，走到“读懂”。</h1>
         <p>
@@ -245,17 +266,18 @@ export default function Assistant() {
           的讲解与材料可供核对和追问。
         </p>
       </section>
-      <div className="segments assistant-tabs">
+      <div className="segments assistant-tabs" aria-label="助学方式">
         {[
-          ["chat", "辅导对话"],
-          ["sentence", "句子拆解"],
-          ["listening", "听力训练"],
-        ].map(([id, label]) => (
+          ["chat", "辅导对话", "sparkles"],
+          ["sentence", "句子拆解", "text"],
+          ["listening", "听力训练", "headphones"],
+        ].map(([id, label, icon]) => (
           <button
             key={id}
             aria-pressed={tab === id}
             onClick={() => switchTab(id as typeof tab)}
           >
+            <Icon name={icon as IconName} />
             {label}
           </button>
         ))}
@@ -276,9 +298,7 @@ export default function Assistant() {
             ))}
           </select>
         </label>
-        <p className="setting-note">
-          只显示账户权限组允许的模型。可用模型没有调用次数或对话数量额度。
-        </p>
+        <p className="setting-note">选择适合当前问题的助学模型。</p>
       </section>
       {tab === "chat" && (
         <section className="assistant-grid">
