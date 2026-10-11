@@ -1,9 +1,11 @@
 # 架构
 
-浏览器 → Next.js（同域 `/api/v1` 转发）→ Go API → PostgreSQL。Redis 已列入 Compose，但第一阶段尚未承担任务队列，不把它加入答题路径。Go API 启动时按文件名顺序执行未应用的 SQL migration。
+Next.js 同源转发 `/api/v1/*` 至 Go API；PostgreSQL 保存权威状态，Redis 留作后续后台任务基础。
 
-数据库是答题日志和派生复习状态的权威存储。`answer_logs` 原样保留；`review_states` 按 `(user_id,sense_id,dimension)` 维护。每次答题在一个事务中锁定 question、检查是否回答过、判分、记录原始答案、更新对应能力维度。相同 request ID 与完全相同的输入返回原结果；改变输入则拒绝。
+Go API 保留现有标准库 HTTP 服务和 pgx。cmd/api 按启动/迁移、队列、答题评级/撤销、统计分文件；internal/learning 隔离判分、选题和 FSRS 适配。复用官方 go-fsrs/v4 v4.0.0，不在应用内重写调度公式。服务端约束题目顺序及失败评级，数据库事务保证日志与记忆状态一致。
 
-部署是本机开发模式，Compose 仅把 Web/API 端口绑定到 `127.0.0.1`。不要将当前无认证体验用户部署到公网。
+浏览器先恢复服务端活动 Session，result 表示已提交，rating 表示已确认完成。lib/study.ts 统一恢复、评级和请求状态判断。浏览器待提交 payload 保留原请求 ID，网络重试幂等，服务器接收后再恢复界面；没有离线缓存或同步引擎。
 
-下一阶段：词库来源与导入、用户注册与权限；再把复习调度替换为 FSRS、建立异步 AI Gateway。性能指标须在部署环境测量，当前未承诺 P95。
+前端沿用现有 Glass 样式并新增题型设置、反馈、评级、撤销、分能力记录和窄屏布局。服务端返回的例句与参考答案只在提交后显示。发音用浏览器 TTS，未来听写应独立建题，避免在中译英作答前泄露单词。
+
+CI 分 Go/数据库、前端、完整 Compose 栈三组。前端需通过实际 build 和状态单元测试；数据库测试运行真实 PostgreSQL 的独立 schema；完整栈使用 HTTP 冒烟检查并在失败时输出日志。当前无账户，不部署生产。

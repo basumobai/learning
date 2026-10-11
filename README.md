@@ -1,26 +1,44 @@
 # ELS · 广东高中英语智能学习平台
 
-当前是**第一阶段可运行样板**：少量原创示例词条、三种题型、答题日志、按能力维度的简易复习时间和手机优先的学习页面。没有接入教材词库、账户、AI 或正式 FSRS；详见 `docs/PRODUCT.md`。
+面向高中英语的独立能力训练：英译中选择、主动释义、中译英拼写。现已接入 **FSRS-6**，支持到期复习、随机新题、题型筛选、答后评价、进度恢复和撤销。当前词库只有 **5 个原创示例词**，尚未接入北师大版教材或账户认证，仅供本机开发。
 
-## 本地启动
+## 启动
 
-安装 Docker 与 Docker Compose 后，在项目根目录运行：
+安装 Docker 与 Docker Compose，在项目根目录运行：
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
-访问 `http://localhost:3000`。首次构建需要访问容器镜像仓库和语言包仓库。PostgreSQL 数据存储在 Compose 卷中。示例用户会由迁移文件创建；本项目**仅供本机开发**，没有身份验证，请勿公开部署。
+打开 `http://localhost:3000`。首次构建需下载镜像和依赖，PostgreSQL 数据保存在 Compose 卷中。停止服务使用 `docker compose down`，保留数据；不要添加 `-v`，除非确实要删除本机开发数据。
 
-服务：Next.js 前端 3000、Go API 8080（只监听本机）、PostgreSQL、Redis。`/api/v1/health` 用于检查 API 和数据库。页面通过 Next.js 的 `/api/v1/*` 转发访问 API。
+前端 3000 和 API 8080 只绑定本机。`demo` 为共享体验身份，没有认证，请勿通过反向代理公开部署。可在 `.env` 中设置 `POSTGRES_PASSWORD`；配置示例见 `.env.example`。
 
-## 开发顺序
+## 使用
 
-1. 把示例词条替换成来源明确、许可清晰、经过校对的词库；建立教材版本与 Unit 关联。
-2. 增加账户认证、用户数据隔离、速率限制，再考虑对外开放。
-3. 将 `review.go` 的临时复习规则替换为经验证的 FSRS 适配层，并迁移现有状态。
-4. 加入后台 AI 判分、超时处理和人工纠错入口；待判答案确认后再更新复习。
+1. 选择按计划学习或自由练习，再选择题型；默认中译英拼写。
+2. 提交答案后，先看参考答案和例句，再评价记忆：重学 / 困难 / 记住了 / 很轻松。
+3. 答错或使用提示时必须重学；未匹配的中文释义由你核对，自评来源单独保留。
+4. 按计划到期优先，同一词义的不同题型分日练习；自由练习不改变正式复习时间。
+5. 刷新会恢复题目和答后反馈。请求未确认时沿用原请求重试；可重新作答或撤销最近一题。
 
 ## 验证
 
-有 Go 和 Node 的开发机可运行：`cd services/api && go test ./...`，`cd apps/web && npm ci && npm run build`。完整集成需执行 `docker compose up --build`。当前执行环境缺少 Go 与 Docker，未运行这两项验证。
+需要 Go 1.26、Node 24。分别在对应目录运行：
+
+```bash
+cd services/api
+go test ./...
+go vet ./...
+```
+
+```bash
+cd apps/web
+npm ci
+npm test
+npm run build
+```
+
+数据库集成测试需要 `TEST_DATABASE_URL` 指向可创建临时 schema 的测试 PostgreSQL；未设置时明确跳过。CI 用 PostgreSQL 17 执行数据库与并发测试，并启动完整 Compose 栈运行 `python3 scripts/smoke.py`。升级使用增量迁移，不重置原数据。
+
+能力对比、审计依据和后续优先级：[AnkiDroid 对比与路线](docs/ANKIDROID_COMPARISON.md)。产品行为：[PRODUCT](docs/PRODUCT.md)，接口：[API](docs/API.md)，安全边界：[SECURITY](docs/SECURITY.md)。
