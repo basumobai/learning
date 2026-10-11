@@ -24,6 +24,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: services/api/go.mod
+          cache-dependency-path: services/api/go.sum
       - run: go mod download && go mod verify
         working-directory: services/api
       - name: Unit, migration and concurrent database integration tests

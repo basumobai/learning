@@ -136,7 +136,7 @@ func (s *server) createSession(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]any{"id": nil, "question_count": 0, "message": "当前没有符合条件的题目，可以稍后复习或选择自由练习。"})
 		return
 	}
-	poolRows, err := tx.QueryContext(ctx, `SELECT DISTINCT meaning_zh FROM word_senses ORDER BY random() LIMIT 100`)
+	poolRows, err := tx.QueryContext(ctx, `SELECT meaning_zh FROM (SELECT DISTINCT meaning_zh FROM word_senses) AS pool ORDER BY random() LIMIT 100`)
 	if err != nil {
 		s.dbError(w, "choice pool", err)
 		return
