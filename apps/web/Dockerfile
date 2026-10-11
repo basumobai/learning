@@ -7,6 +7,7 @@ COPY . .
 RUN npm run build
 FROM node:24-alpine
 WORKDIR /app
-COPY --from=builder /app ./
+COPY --from=builder --chown=node:node /app ./
 EXPOSE 3000
+USER node
 CMD ["npm", "run", "start"]

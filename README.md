@@ -1,26 +1,70 @@
-# ELS · 广东高中英语智能学习平台
+# ELS · 广东高中英语 AI 助学平台
 
-当前是**第一阶段可运行样板**：少量原创示例词条、三种题型、答题日志、按能力维度的简易复习时间和手机优先的学习页面。没有接入教材词库、账户、AI 或正式 FSRS；详见 `docs/PRODUCT.md`。
+当前专注 **Web**：FSRS-6 词汇复习、听音拼写、AI 辅导对话、句子拆解和听力训练。教材词库由管理员自行导入，字段顺序为 **单词、音标、词性、中文**。内置五个原创示例词仅用于开发，不代表教材已导入。
 
 ## 本地启动
 
-安装 Docker 与 Docker Compose 后，在项目根目录运行：
+需要 Docker 与 Docker Compose。复制配置并自行填写密码和加密密钥：
 
 ```bash
-docker compose up --build
+cp .env.example .env
+openssl rand -base64 32
 ```
 
-访问 `http://localhost:3000`。首次构建需要访问容器镜像仓库和语言包仓库。PostgreSQL 数据存储在 Compose 卷中。示例用户会由迁移文件创建；本项目**仅供本机开发**，没有身份验证，请勿公开部署。
+将生成的值填入 `APP_ENCRYPTION_KEY`，设置 `POSTGRES_PASSWORD` 和 15–128 字符的 `ELS_ADMIN_PASSWORD`。首次启动创建 `ELS_ADMIN_USERNAME` 指定的管理员；已有管理员时不会被环境变量覆盖。妥善保管加密密钥，否则已加密的 API Key 和验证器密钥无法解密。`.env` 不提交到 Git。
 
-服务：Next.js 前端 3000、Go API 8080（只监听本机）、PostgreSQL、Redis。`/api/v1/health` 用于检查 API 和数据库。页面通过 Next.js 的 `/api/v1/*` 转发访问 API。
+```bash
+docker compose up --build -d
+```
 
-## 开发顺序
+打开 `http://localhost:3000` 登录。入口只绑定本机。数据库卷持续保存记录；`docker compose down` 保留数据，不要随意添加 `-v`。
 
-1. 把示例词条替换成来源明确、许可清晰、经过校对的词库；建立教材版本与 Unit 关联。
-2. 增加账户认证、用户数据隔离、速率限制，再考虑对外开放。
-3. 将 `review.go` 的临时复习规则替换为经验证的 FSRS 适配层，并迁移现有状态。
-4. 加入后台 AI 判分、超时处理和人工纠错入口；待判答案确认后再更新复习。
+公开测试环境需设置真实 HTTPS `APP_ORIGIN`，让浏览器与 API 通过 Next.js 同源访问。不要将数据库或 API 直接公开。配置、备份及账户恢复见 [SECURITY](docs/SECURITY.md)。本次改造不自动部署或修改生产环境。
+
+## 管理员配置
+
+1. **管理 → 服务商与模型**：填 `https://openrouter.ai/api/v1` 和自己的 API Key。也可使用其他公开 HTTPS OpenAI 兼容接口，例如 `https://api.openai.com/v1`。
+2. 添加聊天模型，填写供应商的完整 model ID。支持 JSON mode 的模型可勾选该参数；未勾选时依靠 JSON 提示与服务端结构校验。
+3. 添加语音模型。OpenRouter 可使用 `openai/gpt-4o-mini-tts-2025-12-15`，音色例如 `cedar, marin, coral`；其他模型需按供应商文档填写音色。朗读风格可配置，不支持 instructions 参数时留空。
+4. **权限组**：勾选允许的聊天和语音模型，再给每个用户分配组。管理员自己调用模型也遵循所属组。**没有应用调用次数额度或对话数量额度**。
+5. **账户**：创建用户并提供初始密码；首次登录强制改密。可停用账户、重置密码及遗失的两步验证。管理写入需要管理员当前密码再次验证。
+6. **教材词库**：上传 UTF-8 CSV/TSV/TXT 或粘贴四字段词表，先预览再确认；重复词义跳过，不同词性/释义及其音标分别保留。保留教材词形大小写（如 English、I），大小写重复不会生成两个单词。
+
+词表示例：
+
+```text
+adapt /əˈdæpt/ v. 适应
+necessary /ˈnesəsəri/ adj. 必要的
+```
+
+CSV 可带表头 `word,phonetic,pos,chinese`；中文含逗号时按 CSV 规则加引号。
+
+## 学习
+
+- 今日复习：到期优先，同词义题型按学习日避让；答后核对，再评价记忆。四种能力独立安排，听音拼写先播放服务端语音，交卷后显示单词和音标。
+- 账户与设置：每日新词预算、目标记忆率、时区、自然语音试听、密码、两步验证、退出其他设备、个人学习数据导出。
+- 词库：搜索、查看音标/词性/中文、暂停或恢复自己的词条，查看反复未独立记住的次数。
+- AI 助学：可恢复辅导对话、句子主干/成分/语法/理解检查、原创听力材料与选择题。听力交卷后显示原文、译文及精确答案依据。
+
+真实模型和语音调用需要管理员填入有效供应商密钥。自动化测试使用模拟供应商，不消耗真实模型余额；模型质量、实际可用音色及账户余额须在配置后试听与验证。AI 生成材料明确标识，不自动当成教材来源或词汇语义判分。
 
 ## 验证
 
-有 Go 和 Node 的开发机可运行：`cd services/api && go test ./...`，`cd apps/web && npm ci && npm run build`。完整集成需执行 `docker compose up --build`。当前执行环境缺少 Go 与 Docker，未运行这两项验证。
+Go 1.26、Node 24：
+
+```bash
+cd services/api
+go test -race ./...
+go vet ./...
+```
+
+```bash
+cd apps/web
+npm ci
+npm test
+npm run build
+```
+
+数据库集成测试需要 `TEST_DATABASE_URL` 指向可创建临时 schema 的 PostgreSQL；未设置时明确跳过。CI 使用 PostgreSQL 17 运行真实迁移、并发、账户隔离、权限、AI 重试、听力交卷、每日预算和撤销测试，并启动 Compose 栈执行带登录的冒烟测试。增量迁移保留已有学习数据。
+
+[AnkiDroid 对比与剩余差距](docs/ANKIDROID_COMPARISON.md) · [产品行为](docs/PRODUCT.md) · [接口](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [AI](docs/AI.md)

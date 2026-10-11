@@ -1,0 +1,37 @@
+package main
+
+import "net/http"
+
+func (s *server) extraRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/auth/login", s.login)
+	mux.HandleFunc("GET /api/v1/auth/me", s.me)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
+	mux.HandleFunc("POST /api/v1/auth/password", s.password)
+	mux.HandleFunc("POST /api/v1/auth/revoke-sessions", s.revokeSessions)
+	mux.HandleFunc("POST /api/v1/auth/mfa", s.mfa)
+	mux.HandleFunc("GET /api/v1/account/export", s.exportAccount)
+	mux.HandleFunc("GET /api/v1/preferences", s.preferences)
+	mux.HandleFunc("POST /api/v1/preferences", s.savePreferences)
+	mux.HandleFunc("POST /api/v1/preferences/voice", s.saveVoice)
+	mux.HandleFunc("GET /api/v1/vocabulary", s.vocabulary)
+	mux.HandleFunc("POST /api/v1/vocabulary/suspend", s.suspendSense)
+	mux.HandleFunc("GET /api/v1/admin/config", s.adminConfig)
+	mux.HandleFunc("POST /api/v1/admin/providers", s.saveProvider)
+	mux.HandleFunc("POST /api/v1/admin/models", s.saveModel)
+	mux.HandleFunc("POST /api/v1/admin/groups", s.saveGroup)
+	mux.HandleFunc("POST /api/v1/admin/users", s.saveUser)
+	mux.HandleFunc("POST /api/v1/admin/vocabulary/preview", s.importPreview)
+	mux.HandleFunc("POST /api/v1/admin/vocabulary/import", s.importVocabulary)
+	mux.HandleFunc("GET /api/v1/ai/models", s.models)
+	mux.HandleFunc("GET /api/v1/ai/conversations", s.conversations)
+	mux.HandleFunc("POST /api/v1/ai/conversations", s.createConversation)
+	mux.HandleFunc("GET /api/v1/ai/conversations/{id}", s.conversation)
+	mux.HandleFunc("POST /api/v1/ai/conversations/{id}/messages", s.chat)
+	mux.HandleFunc("POST /api/v1/ai/training", s.generateTraining)
+	mux.HandleFunc("GET /api/v1/ai/training", s.trainingHistory)
+	mux.HandleFunc("GET /api/v1/ai/training/{id}", s.training)
+	mux.HandleFunc("POST /api/v1/ai/training/{id}/answers", s.listeningAnswer)
+	mux.HandleFunc("POST /api/v1/ai/training/{id}/speech", s.trainingSpeech)
+	mux.HandleFunc("POST /api/v1/ai/speech", s.speech)
+	mux.HandleFunc("POST /api/v1/study/sessions/{id}/questions/{question}/speech", s.questionSpeech)
+}
