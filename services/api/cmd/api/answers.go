@@ -40,7 +40,7 @@ func isCurrent(ctx context.Context, tx *sql.Tx, session, question int64) (bool, 
 	var current int64
 	err := tx.QueryRowContext(ctx, `SELECT q.id FROM study_questions q JOIN study_sessions ss ON ss.id=q.session_id
  LEFT JOIN answer_logs a ON a.question_id=q.id AND a.undone_at IS NULL
- WHERE q.session_id=$1 AND ss.user_id=$2 AND a.rating IS NULL ORDER BY q.position LIMIT 1`, session, demoUser).Scan(&current)
+ WHERE q.session_id=$1 AND ss.user_id=$2 AND a.rating IS NULL ORDER BY q.position LIMIT 1`, session, userID(ctx)).Scan(&current)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -68,7 +68,7 @@ func (s *server) answer(w http.ResponseWriter, r *http.Request) {
 	var kind, lemma, meaning string
 	err = tx.QueryRowContext(ctx, `SELECT q.sense_id,q.question_type,w.lemma,ws.meaning_zh
  FROM study_questions q JOIN study_sessions ss ON ss.id=q.session_id JOIN word_senses ws ON ws.id=q.sense_id JOIN words w ON w.id=ws.word_id
- WHERE q.id=$1 AND ss.id=$2 AND ss.user_id=$3 FOR UPDATE OF q`, input.QuestionID, id, demoUser).Scan(&senseID, &kind, &lemma, &meaning)
+ WHERE q.id=$1 AND ss.id=$2 AND ss.user_id=$3 FOR UPDATE OF q`, input.QuestionID, id, userID(ctx)).Scan(&senseID, &kind, &lemma, &meaning)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "题目不存在")
 		return
@@ -123,7 +123,7 @@ func (s *server) answer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result = learning.Grade(kind, input.Answer, lemma, meaning, aliases)
-	_, err = tx.ExecContext(ctx, `INSERT INTO answer_logs(user_id,session_id,question_id,request_id,raw_answer,result,initial_result,response_time_ms,used_hint) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$8)`, demoUser, id, input.QuestionID, input.RequestID, input.Answer, result, input.ResponseTime, input.UsedHint)
+	_, err = tx.ExecContext(ctx, `INSERT INTO answer_logs(user_id,session_id,question_id,request_id,raw_answer,result,initial_result,response_time_ms,used_hint) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$8)`, userID(ctx), id, input.QuestionID, input.RequestID, input.Answer, result, input.ResponseTime, input.UsedHint)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -165,7 +165,7 @@ func (s *server) review(w http.ResponseWriter, r *http.Request) {
 	var oldNext sql.NullTime
 	err = tx.QueryRowContext(ctx, `SELECT a.id,q.sense_id,q.question_type,ss.mode,a.result,a.initial_result,a.used_hint,a.rating,a.review_request_id,a.resolved_result,a.next_review_at
  FROM answer_logs a JOIN study_questions q ON q.id=a.question_id JOIN study_sessions ss ON ss.id=a.session_id
- WHERE a.question_id=$1 AND ss.id=$2 AND ss.user_id=$3 AND a.undone_at IS NULL FOR UPDATE OF a`, input.QuestionID, id, demoUser).Scan(&logID, &senseID, &kind, &mode, &result, &initial, &usedHint, &rating, &oldRequest, &oldResolution, &oldNext)
+ WHERE a.question_id=$1 AND ss.id=$2 AND ss.user_id=$3 AND a.undone_at IS NULL FOR UPDATE OF a`, input.QuestionID, id, userID(ctx)).Scan(&logID, &senseID, &kind, &mode, &result, &initial, &usedHint, &rating, &oldRequest, &oldResolution, &oldNext)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "请先提交答案")
 		return
@@ -209,7 +209,7 @@ func (s *server) review(w http.ResponseWriter, r *http.Request) {
 	if mode == "scheduled" {
 		v := reviewSnapshot{}
 		var raw []byte
-		err = tx.QueryRowContext(ctx, `SELECT attempts,correct_count,next_review_at,fsrs_card FROM review_states WHERE user_id=$1 AND sense_id=$2 AND dimension=$3 FOR UPDATE`, demoUser, senseID, kind).Scan(&v.Attempts, &v.Correct, &v.Next, &raw)
+		err = tx.QueryRowContext(ctx, `SELECT attempts,correct_count,next_review_at,fsrs_card FROM review_states WHERE user_id=$1 AND sense_id=$2 AND dimension=$3 FOR UPDATE`, userID(ctx), senseID, kind).Scan(&v.Attempts, &v.Correct, &v.Next, &raw)
 		if err == nil {
 			if len(raw) > 0 {
 				if err = json.Unmarshal(raw, &v.Card); err != nil {
@@ -227,7 +227,12 @@ func (s *server) review(w http.ResponseWriter, r *http.Request) {
 	if previous != nil {
 		card = previous.Card
 	}
-	scheduled, err := learning.Schedule(card, time.Now(), result, usedHint, input.Rating)
+	prefs, err := readPreferences(ctx, tx)
+	if err != nil {
+		s.dbError(w, "review preferences", err)
+		return
+	}
+	scheduled, err := learning.Schedule(card, time.Now(), result, usedHint, input.Rating, prefs.Retention)
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
@@ -241,7 +246,7 @@ func (s *server) review(w http.ResponseWriter, r *http.Request) {
 		previousJSON, _ := json.Marshal(previous)
 		next, fsrsLog, snapshot = scheduled.Card.Due, string(logJSON), string(previousJSON)
 		_, err = tx.ExecContext(ctx, `INSERT INTO review_states(user_id,sense_id,dimension,attempts,correct_count,next_review_at,fsrs_card) VALUES($1,$2,$3,1,$4,$5,$6)
-  ON CONFLICT(user_id,sense_id,dimension) DO UPDATE SET attempts=review_states.attempts+1,correct_count=review_states.correct_count+$4,next_review_at=$5,fsrs_card=$6`, demoUser, senseID, kind, boolInt(result == "correct" && !usedHint && input.Rating > 1), next, string(raw))
+  ON CONFLICT(user_id,sense_id,dimension) DO UPDATE SET attempts=review_states.attempts+1,correct_count=review_states.correct_count+$4,next_review_at=$5,fsrs_card=$6`, userID(ctx), senseID, kind, boolInt(result == "correct" && !usedHint && input.Rating > 1), next, string(raw))
 		if err != nil {
 			s.dbError(w, "save FSRS card", err)
 			return
@@ -284,7 +289,7 @@ func (s *server) undo(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var previousSession, previousQuestion int64
-	err = tx.QueryRowContext(ctx, `SELECT session_id,question_id FROM undo_requests WHERE user_id=$1 AND request_id=$2`, demoUser, input.RequestID).Scan(&previousSession, &previousQuestion)
+	err = tx.QueryRowContext(ctx, `SELECT session_id,question_id FROM undo_requests WHERE user_id=$1 AND request_id=$2`, userID(ctx), input.RequestID).Scan(&previousSession, &previousQuestion)
 	if err == nil {
 		if previousSession != id {
 			fail(w, 409, "撤销请求编号已使用")
@@ -310,7 +315,7 @@ func (s *server) undo(w http.ResponseWriter, r *http.Request) {
 	var applied bool
 	var reviewed sql.NullTime
 	err = tx.QueryRowContext(ctx, `SELECT a.id,a.session_id,a.question_id,q.sense_id,q.question_type,a.previous_review,a.schedule_applied,a.reviewed_at
- FROM answer_logs a JOIN study_questions q ON q.id=a.question_id WHERE a.user_id=$1 AND a.undone_at IS NULL ORDER BY a.id DESC LIMIT 1 FOR UPDATE OF a`, demoUser).Scan(&logID, &logSession, &questionID, &senseID, &kind, &snapshot, &applied, &reviewed)
+ FROM answer_logs a JOIN study_questions q ON q.id=a.question_id WHERE a.user_id=$1 AND a.undone_at IS NULL ORDER BY a.id DESC LIMIT 1 FOR UPDATE OF a`, userID(ctx)).Scan(&logID, &logSession, &questionID, &senseID, &kind, &snapshot, &applied, &reviewed)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 409, "没有可撤销的题目")
 		return
@@ -335,14 +340,14 @@ func (s *server) undo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if previous == nil {
-			_, err = tx.ExecContext(ctx, `DELETE FROM review_states WHERE user_id=$1 AND sense_id=$2 AND dimension=$3`, demoUser, senseID, kind)
+			_, err = tx.ExecContext(ctx, `DELETE FROM review_states WHERE user_id=$1 AND sense_id=$2 AND dimension=$3`, userID(ctx), senseID, kind)
 		} else {
 			var raw any
 			if previous.Card != nil {
 				v, _ := json.Marshal(previous.Card)
 				raw = string(v)
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE review_states SET attempts=$4,correct_count=$5,next_review_at=$6,fsrs_card=$7 WHERE user_id=$1 AND sense_id=$2 AND dimension=$3`, demoUser, senseID, kind, previous.Attempts, previous.Correct, previous.Next, raw)
+			_, err = tx.ExecContext(ctx, `UPDATE review_states SET attempts=$4,correct_count=$5,next_review_at=$6,fsrs_card=$7 WHERE user_id=$1 AND sense_id=$2 AND dimension=$3`, userID(ctx), senseID, kind, previous.Attempts, previous.Correct, previous.Next, raw)
 		}
 		if err != nil {
 			s.dbError(w, "restore review", err)
@@ -353,7 +358,7 @@ func (s *server) undo(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "undo answer", err)
 		return
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO undo_requests(user_id,request_id,session_id,question_id) VALUES($1,$2,$3,$4)`, demoUser, input.RequestID, id, questionID); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO undo_requests(user_id,request_id,session_id,question_id) VALUES($1,$2,$3,$4)`, userID(ctx), input.RequestID, id, questionID); err != nil {
 		s.dbError(w, "undo request", err)
 		return
 	}

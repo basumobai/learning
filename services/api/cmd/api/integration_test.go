@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/els/api/internal/security"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -56,13 +58,26 @@ func TestStudyLoopIntegration(t *testing.T) {
 	if err = migrate(ctx, db); err != nil {
 		t.Fatalf("migration replay: %v", err)
 	}
-	server := &server{db: db}
+	server := &server{db: db, origin: "http://localhost:3000"}
+	token := security.Token(32)
+	if _, err = db.ExecContext(ctx, `UPDATE users SET username='study-tester',password_hash=$1 WHERE id='demo'`, security.HashPassword("study-test-long-password")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES($1,'demo',now()+interval '1 day')`, security.Digest(token)); err != nil {
+		t.Fatal(err)
+	}
+	authorize := func(request *http.Request) {
+		request.AddCookie(&http.Cookie{Name: "els_session", Value: token})
+		request.Header.Set("X-ELS-Client", "web")
+		request.Header.Set("X-CSRF-Token", security.CSRF(token))
+	}
 	handler := server.routes()
 	call := func(method, path string, body any, want int) map[string]json.RawMessage {
 		t.Helper()
 		raw, _ := json.Marshal(body)
 		request := httptest.NewRequest(method, path, bytes.NewReader(raw))
 		record := httptest.NewRecorder()
+		authorize(request)
 		handler.ServeHTTP(record, request)
 		if record.Code != want {
 			t.Fatalf("%s %s: got %d want %d: %s", method, path, record.Code, want, record.Body.String())
@@ -219,7 +234,9 @@ func TestStudyLoopIntegration(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			records[i] = httptest.NewRecorder()
-			handler.ServeHTTP(records[i], httptest.NewRequest("POST", "/api/v1/study/sessions", bytes.NewBufferString(`{"mode":"practice","types":["spelling"],"limit":1}`)))
+			request := httptest.NewRequest("POST", "/api/v1/study/sessions", bytes.NewBufferString(`{"mode":"practice","types":["spelling"],"limit":1}`))
+			authorize(request)
+			handler.ServeHTTP(records[i], request)
 		}(i)
 	}
 	wg.Wait()

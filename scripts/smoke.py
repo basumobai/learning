@@ -1,16 +1,20 @@
 """Smoke test the seeded development stack through its public HTTP endpoints."""
 import json
+import os
+from http.cookiejar import CookieJar
 import uuid
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, HTTPCookieProcessor
 
 BASE = 'http://127.0.0.1:8080/api/v1'
+opener = build_opener(HTTPCookieProcessor(CookieJar()))
+csrf = ''
 
 def api(path, body=None, status=200):
     raw = None if body is None else json.dumps(body).encode()
-    request = Request(BASE + path, data=raw, headers={'Content-Type': 'application/json'})
+    request = Request(BASE + path, data=raw, headers={'Content-Type': 'application/json', 'X-ELS-Client': 'web', 'X-CSRF-Token': csrf})
     try:
-        response = urlopen(request, timeout=15)
+        response = opener.open(request, timeout=15)
     except HTTPError as error:
         assert error.code == status, (path, error.code, error.read())
         return json.load(error)
@@ -20,6 +24,8 @@ def api(path, body=None, status=200):
 def rid():
     return str(uuid.uuid4())
 
+api('/auth/login', {'username': os.environ.get('ELS_ADMIN_USERNAME', 'admin'), 'password': os.environ['ELS_ADMIN_PASSWORD'], 'code': ''})
+csrf = api('/auth/me')['csrf_token']
 spellings = {'适应': 'adapt', '采用': 'adopt', '维持': 'maintain', '后果': 'consequence', '必要的': 'necessary'}
 meanings = {value: key for key, value in spellings.items()}
 created = api('/study/sessions', {'types': ['spelling'], 'limit': 2, 'new_limit': 2}, 201)
@@ -62,4 +68,4 @@ assert dashboard['today']['reviewed'] == 4
 assert api('/study/sessions/active')['session'] is None
 with urlopen('http://127.0.0.1:3000/', timeout=15) as response:
     assert response.status == 200 and 'ELS' in response.read().decode()
-print('Complete stack smoke test passed: scheduling, feedback, retry, undo, all three question types, Next.js.')
+print('Complete stack smoke test passed: scheduling, feedback, retry, undo, authenticated web, scheduling, feedback, retry, undo, three text question types, Next.js.')

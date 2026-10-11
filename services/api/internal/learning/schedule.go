@@ -10,7 +10,7 @@ import (
 // Schedule uses the upstream FSRS-6 scheduler without changing its equations.
 // Correctness and hint use constrain the rating; elapsed answer time is logged
 // for diagnostics, not passed off as an FSRS input.
-func Schedule(card *fsrs.Card, now time.Time, result string, usedHint bool, rating int) (fsrs.SchedulingInfo, error) {
+func Schedule(card *fsrs.Card, now time.Time, result string, usedHint bool, rating int, retention ...float64) (fsrs.SchedulingInfo, error) {
 	if rating < 1 || rating > 4 {
 		return fsrs.SchedulingInfo{}, fmt.Errorf("invalid rating")
 	}
@@ -24,15 +24,16 @@ func Schedule(card *fsrs.Card, now time.Time, result string, usedHint bool, rati
 	if card != nil {
 		current = *card
 	}
-	return fsrs.NewFSRS(fsrs.DefaultParam()).Next(current, now, fsrs.Rating(rating))
+	params := parameters(retention)
+	return fsrs.NewFSRS(params).Next(current, now, fsrs.Rating(rating))
 }
 
-func Preview(card *fsrs.Card, now time.Time) (map[int]time.Time, error) {
+func Preview(card *fsrs.Card, now time.Time, retention ...float64) (map[int]time.Time, error) {
 	current := fsrs.NewCard(now)
 	if card != nil {
 		current = *card
 	}
-	records, err := fsrs.NewFSRS(fsrs.DefaultParam()).Repeat(current, now)
+	records, err := fsrs.NewFSRS(parameters(retention)).Repeat(current, now)
 	if err != nil {
 		return nil, err
 	}
@@ -41,4 +42,12 @@ func Preview(card *fsrs.Card, now time.Time) (map[int]time.Time, error) {
 		due[int(rating)] = record.Card.Due
 	}
 	return due, nil
+}
+
+func parameters(retention []float64) fsrs.Parameters {
+	p := fsrs.DefaultParam()
+	if len(retention) > 0 && retention[0] >= .8 && retention[0] <= .97 {
+		p.RequestRetention = retention[0]
+	}
+	return p
 }

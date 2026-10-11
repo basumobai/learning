@@ -1,11 +1,15 @@
 # 架构
 
-Next.js 同源转发 `/api/v1/*` 至 Go API；PostgreSQL 保存权威状态，Redis 留作后续后台任务基础。
+Next.js Web 同源转发 `/api/v1/*` 到 Go 标准库 HTTP API；PostgreSQL 是全部学习、账户和配置的权威来源。Redis 预留，当前不依赖它实现队列或会话。
 
-Go API 保留现有标准库 HTTP 服务和 pgx。cmd/api 按启动/迁移、队列、答题评级/撤销、统计分文件；internal/learning 隔离判分、选题和 FSRS 适配。复用官方 go-fsrs/v4 v4.0.0，不在应用内重写调度公式。服务端约束题目顺序及失败评级，数据库事务保证日志与记忆状态一致。
+Go 模块按认证/MFA、管理员配置、词库导入、偏好、复习队列、答题/评级/撤销、AI 供应商、辅导对话、训练、TTS 与导出分文件。internal/learning 只适配官方 FSRS/判分/队列；internal/security 实现密码、加密、CSRF 派生与 TOTP；internal/vocabulary 解析四字段文本。
 
-浏览器先恢复服务端活动 Session，result 表示已提交，rating 表示已确认完成。lib/study.ts 统一恢复、评级和请求状态判断。浏览器待提交 payload 保留原请求 ID，网络重试幂等，服务器接收后再恢复界面；没有离线缓存或同步引擎。
+认证中间件查不透明会话，构建用户上下文并验证 CSRF、初始改密、管理员角色。业务资源通过上下文 user_id 校验所有者，不接受传入用户替代身份。权限组查询每次由 users → group_models → ai_models → ai_providers 完成，密钥只在服务端解密。
 
-前端沿用现有 Glass 样式并新增题型设置、反馈、评级、撤销、分能力记录和窄屏布局。服务端返回的例句与参考答案只在提交后显示。发音用浏览器 TTS，未来听写应独立建题，避免在中译英作答前泄露单词。
+学习状态写入先锁本人 users 行，再以短事务维护日志、FSRS 和撤销快照。用户之间没有共享 demo 身份。AI 请求用短事务预留幂等编号，网络调用在事务之外进行，完成后事务保存历史及响应。相同对话并发请求被拒绝，避免历史越序。请求失败/供应商超时可重试；进程崩溃的 running 预留三分钟后可重取，外部计费不宣称 exactly-once。
 
-CI 分 Go/数据库、前端、完整 Compose 栈三组。前端需通过实际 build 和状态单元测试；数据库测试运行真实 PostgreSQL 的独立 schema；完整栈使用 HTTP 冒烟检查并在失败时输出日志。当前无账户，不部署生产。
+AI 文本使用 Chat Completions JSON 结构，语音使用 Audio Speech MP3 字节流。自定义传输拒绝私有 DNS 地址、代理和重定向，维持 HTTPS 校验；客户端看不到 API Key。生成训练先验证字段与原文依据，再保存并输出。未交卷听力不输出原文及答案，音频由服务端取原文合成。
+
+Web 保留 Glass 风格、深色/减少动效/窄屏支持，新增登录、管理、设置、词库和 AI 页面。身份保存在 HttpOnly Cookie；CSRF 仅存内存。lib/study.ts 和 lib/ai-state.ts 分别解析学习与 AI 待确认请求，恢复记录按账户隔离；sessionStorage 只保存学习请求，不保存 API Key 或密码。文本用 React 转义渲染，无模型代码执行或 dangerouslySetInnerHTML。
+
+CI 包含 Go 与真实 PostgreSQL 17 隔离 schema 测试、前端状态/TypeScript/build、带登录的完整 Compose 冒烟。模拟供应商检验权限、上下文、结构和缓存，不调用真实付费模型。改动保留在审查分支，不自动合并或部署。

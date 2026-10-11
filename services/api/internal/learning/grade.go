@@ -23,7 +23,7 @@ func Grade(kind, answer, lemma, meaning string, aliases []string) string {
 		return "wrong"
 	}
 	switch kind {
-	case "spelling":
+	case "spelling", "listening_spelling":
 		if strings.EqualFold(strings.TrimSpace(answer), strings.TrimSpace(lemma)) {
 			return "correct"
 		}

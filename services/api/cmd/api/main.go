@@ -16,9 +16,13 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const demoUser = "demo"
-
-type server struct{ db *sql.DB }
+type server struct {
+	db            *sql.DB
+	origin        string
+	secureCookie  bool
+	encryptionKey []byte
+	client        *http.Client
+}
 
 func main() {
 	dsn := os.Getenv("DATABASE_URL")
@@ -44,14 +48,20 @@ func main() {
 	if err := migrate(ctx, db); err != nil {
 		log.Fatal(err)
 	}
-	s := &server{db}
+	s, err := configure(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := s.bootstrap(context.Background()); err != nil {
+		log.Fatal(err)
+	}
 	mux := s.routes()
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
 	log.Printf("ELS API listening on %s", addr)
-	log.Fatal((&http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}).ListenAndServe())
+	log.Fatal((&http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 130 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 * 1024}).ListenAndServe())
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -114,7 +124,10 @@ func fail(w http.ResponseWriter, status int, message string) {
 	respond(w, status, map[string]string{"error": message})
 }
 func decode(r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(nil, r.Body, 4096)
+	return decodeLimit(r, dst, 4096)
+}
+func decodeLimit(r *http.Request, dst any, limit int64) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, limit)
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -151,7 +164,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/answers", s.answer)
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/review", s.review)
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/undo", s.undo)
-	return mux
+	s.extraRoutes(mux)
+	return s.protect(mux)
 }
 func (s *server) dbError(w http.ResponseWriter, action string, err error) {
 	log.Printf("%s: %v", action, err)

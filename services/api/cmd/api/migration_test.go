@@ -75,7 +75,7 @@ func TestPhase0UpgradeIntegration(t *testing.T) {
 	if attempts != 2 || correct != 2 || !due.Equal(expected) || len(card) != 0 {
 		t.Fatal("migration fabricated memory or lost historical state")
 	}
-	ss, err := (&server{db: db}).loadSession(ctx, 1)
+	ss, err := (&server{db: db}).loadSession(context.WithValue(ctx, identityKey{}, identity{ID: "demo"}), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

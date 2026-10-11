@@ -39,7 +39,7 @@ func (o *Options) Validate() error {
 	}
 	seen := make(map[string]bool)
 	for _, kind := range o.Types {
-		if (kind != "recognition" && kind != "meaning_recall" && kind != "spelling") || seen[kind] {
+		if (kind != "recognition" && kind != "meaning_recall" && kind != "spelling" && kind != "listening_spelling") || seen[kind] {
 			return fmt.Errorf("invalid types")
 		}
 		seen[kind] = true

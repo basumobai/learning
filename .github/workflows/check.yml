@@ -50,6 +50,10 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: '1'
   integration:
+    env:
+      ELS_ADMIN_USERNAME: admin
+      ELS_ADMIN_PASSWORD: els-ci-disposable-password-only
+      APP_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
