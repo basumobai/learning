@@ -68,6 +68,7 @@ CREATE TABLE user_preferences (
   voice text NOT NULL DEFAULT 'cedar'
 );
 ALTER TABLE word_senses ADD COLUMN phonetic text NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX words_lemma_casefold_unique ON words(lower(lemma));
 ALTER TABLE word_senses ALTER COLUMN example_en SET DEFAULT '';
 CREATE UNIQUE INDEX sense_content_unique ON word_senses(word_id,part_of_speech,meaning_zh);
 CREATE TABLE vocabulary_imports (

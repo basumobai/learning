@@ -21,7 +21,7 @@
 
 旧 demo 用户没有 username/password_hash，不能登录；旧记录保留，未擅自分配给新账户。首次管理员根据环境配置创建。已有管理员时不重设凭据。
 
-词义唯一索引为 word_id + part_of_speech + meaning_zh，导入不会替换旧词义及其复习引用。words.lemma 保持唯一，音标保存在 word_senses，可保留 record 名词/动词等不同读音；默认仅为空音标补值，显式允许时覆盖对应义项音标。自评不自动扩充释义别名。
+词义唯一索引为 word_id + part_of_speech + meaning_zh，导入不会替换旧词义及其复习引用。words.lemma 保留首次入库的规范大小写，以 lower(lemma) 唯一索引合并大小写重复；音标保存在 word_senses，可保留 record 名词/动词等不同读音；默认仅为空音标补值，显式允许时覆盖对应义项音标。自评不自动扩充释义别名。
 
 复习状态维度包含新增 listening_spelling，与传统 spelling 独立。调度与日志写入在同一用户事务。previous_review 保存完整旧值；首次新增用 JSON null，撤销删除新状态并恢复每日预算。已有状态撤销回完整快照，不用旧 attempts 推断 FSRS 参数。
 

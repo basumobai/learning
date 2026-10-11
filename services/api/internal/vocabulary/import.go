@@ -95,7 +95,7 @@ func Parse(text string) Preview {
 		for j := range row {
 			row[j] = strings.TrimSpace(row[j])
 		}
-		entry := Entry{strings.ToLower(strings.Join(strings.Fields(row[0]), " ")), row[1], row[2], row[3], line}
+		entry := Entry{strings.Join(strings.Fields(row[0]), " "), row[1], row[2], row[3], line}
 		valid := english.MatchString(entry.Word) && len([]rune(entry.Word)) <= 100 && entry.Phonetic != "" && len([]rune(entry.Phonetic)) <= 150 && entry.POS != "" && len(entry.POS) <= 40 && entry.Chinese != "" && len([]rune(entry.Chinese)) <= 500
 		for _, field := range row {
 			if strings.ContainsFunc(field, func(r rune) bool { return unicode.IsControl(r) }) {
@@ -106,7 +106,7 @@ func Parse(text string) Preview {
 			result.Errors = append(result.Errors, Issue{line, "字段为空、过长或包含不支持的字符"})
 			continue
 		}
-		key := entry.Word + "\x00" + entry.POS + "\x00" + entry.Chinese
+		key := strings.ToLower(entry.Word) + "\x00" + entry.POS + "\x00" + entry.Chinese
 		if old, exists := seen[key]; exists {
 			if old != entry.Phonetic {
 				result.Errors = append(result.Errors, Issue{line, "同一义项的重复行音标不一致"})

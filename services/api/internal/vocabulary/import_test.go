@@ -13,6 +13,10 @@ func TestFourColumnImport(t *testing.T) {
 	if p.Valid() != nil || len(p.Entries) != 2 || p.Duplicates != 1 {
 		t.Fatal("sense or duplicate handling failed")
 	}
+	capital := Parse("English /ˈɪŋɡlɪʃ/ n. 英语\nenglish /ˈɪŋɡlɪʃ/ n. 英语\nI /aɪ/ pron. 我")
+	if capital.Valid() != nil || len(capital.Entries) != 2 || capital.Entries[0].Word != "English" || capital.Entries[1].Word != "I" || capital.Duplicates != 1 {
+		t.Fatal("textbook capitalization lost or case duplicate retained")
+	}
 	for _, text := range []string{"adapt,missing,column", "adapt,,v.,适应", "=formula,/ipa/,v.,适应", "word,phonetic,pos,chinese", "adapt /ipa/ v. 适应\nbroken line", "adapt /ipa/ v. 适应\nadapt /other/ v. 适应"} {
 		if Parse(text).Valid() == nil {
 			t.Fatalf("invalid import accepted: %s", text)

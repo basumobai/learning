@@ -328,6 +328,13 @@ func TestAccountsAIAndLearningIsolation(t *testing.T) {
 	if noun != "/ˈrekɔːd/" || verb != "/rɪˈkɔːd/" {
 		t.Fatal("heteronym IPA overwritten across senses")
 	}
+	a.call("POST", "/api/v1/admin/vocabulary/import", map[string]any{"text": "English /ˈɪŋɡlɪʃ/ n. 英语", "request_id": "capitalized-import-0001", "admin_password": password}, 200)
+	a.call("POST", "/api/v1/admin/vocabulary/import", map[string]any{"text": "english /ˈɪŋɡlɪʃ/ n. 英语", "request_id": "capitalized-import-0002", "admin_password": password}, 200)
+	var capital string
+	var copies int
+	if err := db.QueryRow(`SELECT MIN(lemma),COUNT(*) FROM words WHERE lower(lemma)='english'`).Scan(&capital, &copies); err != nil || capital != "English" || copies != 1 {
+		t.Fatal("capitalization or case-insensitive import uniqueness failed")
+	}
 	// Complete the restored spelling, then exercise dictation as a distinct FSRS dimension.
 	u.call("POST", fmt.Sprintf("/api/v1/study/sessions/%d/answers", sid), answerInput{qid, "student-answer-0002", answer, 1000, false}, 200)
 	u.call("POST", fmt.Sprintf("/api/v1/study/sessions/%d/review", sid), reviewInput{qid, "student-review-0002", 3, ""}, 200)

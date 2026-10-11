@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"example.com/els/api/internal/security"
 	"example.com/els/api/internal/vocabulary"
@@ -63,11 +64,13 @@ func (s *server) importVocabulary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Stable lock order also makes overlapping imports by different administrators safe.
-	sort.Slice(preview.Entries, func(i, j int) bool { return preview.Entries[i].Word < preview.Entries[j].Word })
+	sort.Slice(preview.Entries, func(i, j int) bool {
+		return strings.ToLower(preview.Entries[i].Word) < strings.ToLower(preview.Entries[j].Word)
+	})
 	skipped = preview.Duplicates
 	for _, entry := range preview.Entries {
 		var word, sense int64
-		err = tx.QueryRowContext(r.Context(), `INSERT INTO words(lemma) VALUES($1) ON CONFLICT(lemma) DO UPDATE SET lemma=EXCLUDED.lemma RETURNING id`, entry.Word).Scan(&word)
+		err = tx.QueryRowContext(r.Context(), `INSERT INTO words(lemma) VALUES($1) ON CONFLICT((lower(lemma))) DO UPDATE SET lemma=words.lemma RETURNING id`, entry.Word).Scan(&word)
 		if err != nil {
 			s.dbError(w, "import word", err)
 			return
