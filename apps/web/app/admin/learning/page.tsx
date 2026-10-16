@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, upload, type Model } from "../../../lib/api";
 import { subjects } from "../../../lib/learning";
 import { Loading, Navigation, useProtected } from "../../providers";
+import { ModelScopeSelector } from "../../components/ModelScopeSelector";
 type Task = {
   task: string;
   prompt: string;
@@ -75,6 +76,7 @@ export default function AdminLearning() {
       Record<string, { name: string; prompt: string }>
     >({}),
     [models, setModels] = useState<Model[]>([]),
+    [modelProviders, setModelProviders] = useState<{ id: string; name: string }[]>([]),
     [task, setTask] = useState<Task | null>(null),
     [drafts, setDrafts] = useState<Draft[]>([]),
     [draft, setDraft] = useState<Draft | null>(null),
@@ -104,7 +106,7 @@ export default function AdminLearning() {
       api<{ tasks: Task[]; defaults: typeof defaults }>(
         "/admin/learning/tasks",
       ),
-      api<{ models: Model[] }>("/admin/config"),
+      api<{ models: Model[]; providers: { id: string; name: string }[] }>("/admin/config"),
       api<{ sets: WordSet[] }>("/admin/learning/word-sets"),
       api<{ questions: Draft[] }>("/admin/learning/questions"),
       api<{ connections: Cloud[] }>("/admin/learning/cloud"),
@@ -113,6 +115,7 @@ export default function AdminLearning() {
     setTasks(t.tasks);
     setDefaults(t.defaults);
     setModels(c.models.filter((m) => m.kind === "chat"));
+    setModelProviders(c.providers);
     setSets(w.sets);
     setDrafts(q.questions);
     setClouds(cc.connections);
@@ -304,32 +307,20 @@ export default function AdminLearning() {
                   </>
                 )}
                 {task.backend === "api" && task.task !== "essay_lead" && (
-                  <fieldset className="chapter-picker">
+                  <fieldset className="model-scope-fieldset">
                     <legend>
                       {task.task === "essay_reviewer"
                         ? "评审模型（2–5个）"
                         : "任务模型（按选择顺序使用第一个）"}
                     </legend>
-                    {models.map((m) => (
-                      <label key={m.id}>
-                        <input
-                          type="checkbox"
-                          checked={task.model_ids.includes(m.id)}
-                          onChange={(e) =>
-                            setTask({
-                              ...task,
-                              model_ids: e.target.checked
-                                ? [...task.model_ids, m.id]
-                                : task.model_ids.filter((id) => id !== m.id),
-                            })
-                          }
-                        />
-                        <span>
-                          {m.name}
-                          <small>{m.model_id}</small>
-                        </span>
-                      </label>
-                    ))}
+                    <ModelScopeSelector
+                      label="任务预设模型"
+                      models={models}
+                      providers={modelProviders}
+                      selected={task.model_ids}
+                      maxSelected={5}
+                      onChange={(ids) => setTask((current) => current ? { ...current, model_ids: ids } : current)}
+                    />
                   </fieldset>
                 )}
                 {task.task === "essay_lead" && (
