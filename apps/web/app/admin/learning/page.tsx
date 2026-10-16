@@ -1,4 +1,5 @@
 "use client";
+import { ModelScopeSelector } from "../../components/ModelScopeSelector";
 import { ServerPDFInbox, DocumentOCR } from "../../components/ServerPDFInbox";
 import { DocumentScope } from "../../components/DocumentScope";
 import type { Recognition } from "../../../lib/curriculum";
@@ -15,6 +16,7 @@ type Task = {
   model_ids: number[];
   lead_model_id: number | null;
   revision: number;
+  routing?: {fallback_enabled:boolean;max_attempts:number;timeout_seconds:number;max_input_tokens:number;max_output_tokens:number;max_cost_usd:number|null};
 };
 type Chapter = {
   key: string;
@@ -331,33 +333,9 @@ export default function AdminLearning() {
                   </>
                 )}
                 {task.backend === "api" && task.task !== "essay_lead" && (
-                  <fieldset className="chapter-picker">
-                    <legend>
-                      {task.task === "essay_reviewer"
-                        ? "评审模型（2–5个）"
-                        : "任务模型（按选择顺序使用第一个）"}
-                    </legend>
-                    {models.map((m) => (
-                      <label key={m.id}>
-                        <input
-                          type="checkbox"
-                          checked={task.model_ids.includes(m.id)}
-                          onChange={(e) =>
-                            setTask({
-                              ...task,
-                              model_ids: e.target.checked
-                                ? [...task.model_ids, m.id]
-                                : task.model_ids.filter((id) => id !== m.id),
-                            })
-                          }
-                        />
-                        <span>
-                          {m.name}
-                          <small>{m.model_id}</small>
-                        </span>
-                      </label>
-                    ))}
-                  </fieldset>
+                  <div><ModelScopeSelector models={models} selected={task.model_ids} onChange={ids=>setTask({...task,model_ids:ids})} maxSelected={5} label={task.task==="essay_reviewer"?"独立评审模型":"任务候选池"}/>
+                  <ol className="route-order">{task.model_ids.map((id,index)=><li key={id}><span>{index===0?"首选":"备用"}：{models.find(m=>m.id===id)?.name||id}</span><button type="button" className="quiet" disabled={index===0} onClick={()=>{const ids=[...task.model_ids];[ids[index-1],ids[index]]=[ids[index],ids[index-1]];setTask({...task,model_ids:ids});}}>上移</button></li>)}</ol>
+                  {task.routing&&task.task!=="essay_reviewer"&&<div className="form-grid"><label className="check-label"><input type="checkbox" checked={task.routing.fallback_enabled} onChange={e=>setTask({...task,routing:{...task.routing!,fallback_enabled:e.target.checked}})}/>首选失败后按顺序使用已授权备用</label>{([['max_attempts','最多外部尝试'],['timeout_seconds','总超时（秒）'],['max_input_tokens','最大输入tokens'],['max_output_tokens','最大输出tokens']] as const).map(([key,label])=><label key={key}>{label}<input type="number" value={task.routing![key]} onChange={e=>setTask({...task,routing:{...task.routing!,[key]:Number(e.target.value)}})}/></label>)}<label>单次费用上限 USD（留空仅限制token）<input type="number" step="0.001" value={task.routing.max_cost_usd??""} onChange={e=>setTask({...task,routing:{...task.routing!,max_cost_usd:e.target.value?Number(e.target.value):null}})}/></label></div>}</div>
                 )}
                 {task.task === "essay_lead" && (
                   <p className="setting-note">

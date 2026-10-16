@@ -128,6 +128,9 @@ func (s *server) taskModels(ctx context.Context, task string, personal bool) ([]
 	result := []aiModel{}
 	for _, id := range ids {
 		m, err := s.learningModel(ctx, id)
+		if task != "essay_reviewer" {
+			m.routeTask = task
+		}
 		if err != nil {
 			return nil, aiModel{}, fmt.Errorf("任务模型未授权或已停用")
 		}
@@ -235,7 +238,7 @@ func (s *server) learningTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var raw json.RawMessage
-	if err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT task,prompt,backend,codex_model,model_ids,lead_model_id,revision FROM learning_ai_tasks ORDER BY task) t`).Scan(&raw); err != nil {
+	if err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT task,prompt,backend,codex_model,model_ids,lead_model_id,revision,routing FROM learning_ai_tasks ORDER BY task) t`).Scan(&raw); err != nil {
 		s.dbError(w, "task config", err)
 		return
 	}
@@ -243,14 +246,15 @@ func (s *server) learningTasks(w http.ResponseWriter, r *http.Request) {
 }
 func (s *server) saveLearningTask(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Task       string  `json:"task"`
-		Prompt     string  `json:"prompt"`
-		Backend    string  `json:"backend"`
-		CodexModel string  `json:"codex_model"`
-		ModelIDs   []int64 `json:"model_ids"`
-		LeadID     *int64  `json:"lead_model_id"`
-		Revision   int     `json:"revision"`
-		Password   string  `json:"admin_password"`
+		Task       string       `json:"task"`
+		Prompt     string       `json:"prompt"`
+		Backend    string       `json:"backend"`
+		CodexModel string       `json:"codex_model"`
+		ModelIDs   []int64      `json:"model_ids"`
+		LeadID     *int64       `json:"lead_model_id"`
+		Revision   int          `json:"revision"`
+		Password   string       `json:"admin_password"`
+		Routing    *routePolicy `json:"routing"`
 	}
 	if decodeLimit(r, &in, 60000) != nil || learningDefaults[in.Task].Name == "" || strings.TrimSpace(in.Prompt) == "" || len([]rune(in.Prompt)) > 12000 || len(in.ModelIDs) > 5 {
 		fail(w, 400, "提示词或模型配置无效")
@@ -265,6 +269,12 @@ func (s *server) saveLearningTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.adminPassword(w, r, in.Password) {
 		return
+	}
+	if in.Routing != nil {
+		if err := in.Routing.validate(); err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
 	}
 	seen := map[int64]bool{}
 	for _, id := range in.ModelIDs {
@@ -295,14 +305,23 @@ func (s *server) saveLearningTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(r.Context(), `UPDATE learning_ai_tasks SET prompt=$2,model_ids=$3,lead_model_id=$4,backend=$6,codex_model=$7,revision=revision+1,updated_at=now() WHERE task=$1 AND revision=$5`, in.Task, in.Prompt, string(raw), in.LeadID, in.Revision, in.Backend, in.CodexModel)
+	result, err := tx.ExecContext(r.Context(), `UPDATE learning_ai_tasks SET prompt=$2,model_ids=$3,lead_model_id=$4,backend=$6,codex_model=$7,revision=revision+1,updated_at=now()  ,routing=COALESCE($8::jsonb,routing) WHERE task=$1 AND revision=$5`, in.Task, in.Prompt, string(raw), in.LeadID, in.Revision, in.Backend, in.CodexModel, nullableJSON(in.Routing))
 	if err == nil {
 		n, _ := result.RowsAffected()
 		if n == 0 {
 			fail(w, 409, "配置已改变，请刷新后再保存")
 			return
 		}
-		err = audit(tx, r, "save_learning_task", in.Task)
+		_, err = tx.ExecContext(r.Context(), `DELETE FROM ai_task_candidates WHERE task=$1`, in.Task)
+		for priority, id := range in.ModelIDs {
+			if err != nil {
+				break
+			}
+			_, err = tx.ExecContext(r.Context(), `INSERT INTO ai_task_candidates(task,model_id,priority) VALUES($1,$2,$3)`, in.Task, id, priority)
+		}
+		if err == nil {
+			err = audit(tx, r, "save_learning_task", in.Task)
+		}
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -316,6 +335,9 @@ func (s *server) saveLearningTask(w http.ResponseWriter, r *http.Request) {
 
 // Multimodal content is sent only by the PDF worker. Existing chat storage remains textual.
 func (s *server) learningCompletion(ctx context.Context, m aiModel, prompt string, content any) (string, error) {
+	return s.routedLearningCompletion(ctx, m, prompt, content)
+}
+func (s *server) singleLearningCompletion(ctx context.Context, m aiModel, prompt string, content any) (string, error) {
 	if m.ID == -1 {
 		return s.codexCompletion(ctx, m.ModelID, prompt, content)
 	}

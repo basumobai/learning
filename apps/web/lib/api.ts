@@ -67,12 +67,12 @@ async function headers(
     ...(authenticated ? { "X-CSRF-Token": csrf } : {}),
   };
 }
-export async function api<T>(path: string, body?: object): Promise<T> {
+export async function api<T>(path: string, body?: object, method: "POST" | "PUT" | "PATCH" | "DELETE" = "POST"): Promise<T> {
   const response = await fetchAPI(
     `/api/v1${path}`,
     body
       ? {
-          method: "POST",
+          method,
           headers: await headers(
             !["/auth/login", "/auth/register"].includes(path),
           ),

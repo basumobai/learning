@@ -3867,3 +3867,9 @@ body:has(.figure-dialog[open]) {
     --page-gutter: 16px;
   }
 }
+
+/* Shared discovery and routing controls */
+.model-catalog-dialog{width:min(960px,calc(100vw - 24px));max-height:90dvh;overflow:auto;border:1px solid var(--line,#ddd);border-radius:24px;padding:24px;background:var(--surface,#fff);color:var(--text,#222)}
+.model-catalog-dialog::backdrop{background:rgb(20 30 50/.45);backdrop-filter:blur(5px)}
+.catalog-actions{display:flex;gap:12px;flex-wrap:wrap;position:sticky;bottom:0;padding:16px 0;background:inherit}.catalog-metadata{display:grid;gap:12px;max-height:320px;overflow:auto}.catalog-metadata article{display:grid;gap:4px;border-bottom:1px solid #8884;padding:12px 0;overflow-wrap:anywhere}.route-order{padding-left:24px}.route-order li{display:flex;gap:12px;justify-content:space-between;align-items:center;margin:8px 0}.catalog-metadata code{white-space:normal}
+@media(max-width:600px){.model-catalog-dialog{padding:16px;border-radius:18px}.catalog-actions>*{flex:1}}

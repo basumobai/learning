@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { api, requestID, type User } from "../../lib/api";
 import { Loading, Navigation, useProtected } from "../providers";
+import { ModelScopeSelector } from "../components/ModelScopeSelector";
+import { ProviderModelCatalog } from "../components/ProviderModelCatalog";
 import { RegistrationPolicy } from "../components/RegistrationPolicy";
 
 type Provider = {
@@ -86,6 +88,8 @@ export default function Admin() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState(emptyProvider);
+  const [catalogProvider,setCatalogProvider]=useState("");
+  const [bulkModels,setBulkModels]=useState<number[]>([]);
   const [model, setModel] = useState(emptyModel);
   const [voices, setVoices] = useState("cedar, marin, coral");
   const [group, setGroup] = useState<Group>({ id: 0, name: "", model_ids: [] });
@@ -140,6 +144,8 @@ export default function Admin() {
   return (
     <main className="shell">
       <Navigation />
+      {catalogProvider&&<ProviderModelCatalog providerId={catalogProvider} onClose={()=>setCatalogProvider("")} onSaved={load}/>}
+      {tab==="providers"&&!!config?.models.length&&<section className="panel glass"><h2>批量启用与停用</h2><ModelScopeSelector models={config.models.map(m=>({...m,enabled:true}))} providers={config.providers} selected={bulkModels} onChange={setBulkModels} label="批量模型管理"/><div className="segments">{[true,false].map(enabled=><button key={String(enabled)} className="quiet" disabled={busy||!bulkModels.length} onClick={()=>void run(async()=>{await api("/admin/ai/models",{ids:bulkModels,enabled},"PATCH");await load();setBulkModels([]);})}>{enabled?"启用所选":"停用所选"}</button>)}</div></section>}
       <p className="section-links">
         <a href="/admin/learning">
           多学科题库、PDF 与云盘入库、AI 提示词及极速四选一 →
@@ -241,6 +247,7 @@ export default function Admin() {
                     id: String(saved.id),
                     api_key: "",
                   });
+                  setCatalogProvider(String(saved.id));
                 });
               }}
             >
@@ -291,9 +298,8 @@ export default function Admin() {
                 />
                 启用服务商
               </label>
-              <button className="primary" disabled={busy || !adminPassword}>
-                保存服务商
-              </button>
+              <button className="primary" disabled={busy || !adminPassword}>保存服务商并选择模型</button>
+              {provider.id&&<button type="button" className="quiet" onClick={()=>setCatalogProvider(provider.id)}>获取模型目录 / 选择模型</button>}
             </form>
           </section>
           <section className="panel glass">
@@ -515,29 +521,7 @@ export default function Admin() {
                 maxLength={100}
               />
             </label>
-            <fieldset>
-              <legend>允许调用的模型</legend>
-              <div className="model-grants">
-                {config?.models.map((m) => (
-                  <label className="check-label" key={m.id}>
-                    <input
-                      type="checkbox"
-                      checked={group.model_ids.includes(m.id)}
-                      onChange={(e) =>
-                        setGroup({
-                          ...group,
-                          model_ids: e.target.checked
-                            ? [...group.model_ids, m.id]
-                            : group.model_ids.filter((id) => id !== m.id),
-                        })
-                      }
-                    />
-                    {m.name} · {m.kind === "tts" ? "语音" : "聊天"}
-                    {!m.enabled ? "（已停用）" : ""}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+<ModelScopeSelector models={config?.models||[]} providers={config?.providers||[]} selected={group.model_ids} onChange={ids=>setGroup({...group,model_ids:ids})} label="身份组模型授权"/>
             <p className="setting-note">
               学生只能选择组内启用的模型；撤销授权会阻止待执行任务与后续追问。管理员在学生练习区也遵循身份组，资料入库任务单独按管理员配置执行。没有调用次数额度。
             </p>

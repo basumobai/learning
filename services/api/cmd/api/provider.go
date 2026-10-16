@@ -83,6 +83,8 @@ type aiModel struct {
 	instructions string
 	version      string
 	jsonMode     bool
+	routeTask    string
+	maxOutput    int
 }
 
 func (m aiModel) hasVoice(voice string) bool {
@@ -142,7 +144,32 @@ func (s *server) models(w http.ResponseWriter, r *http.Request) {
 type upstreamError struct{ status int }
 
 func (e upstreamError) Error() string { return fmt.Sprintf("provider returned HTTP %d", e.status) }
-func (s *server) upstream(ctx context.Context, m aiModel, path string, body any, limit int64) ([]byte, error) {
+func (s *server) upstream(ctx context.Context, m aiModel, path string, body any, limit int64) (returned []byte, returnedErr error) {
+	release, slotErr := takeAISlot(userID(ctx))
+	if slotErr != nil {
+		return nil, slotErr
+	}
+	defer release()
+	invocation := ""
+	if path == "/chat/completions" {
+		output := m.maxOutput
+		if output == 0 {
+			output = s.routePolicy(ctx, m.routeTask).Output
+		}
+		if request, ok := body.(map[string]any); ok {
+			request["max_tokens"] = output
+		}
+		bound, budgetErr := s.checkCallBudget(ctx, m, body)
+		if budgetErr != nil {
+			return nil, budgetErr
+		}
+		var logErr error
+		invocation, logErr = s.recordInvocation(ctx, m, bound, output)
+		if logErr != nil {
+			return nil, fmt.Errorf("调用记录暂不可用")
+		}
+		defer func() { s.finishInvocation(ctx, invocation, returned, returnedErr) }()
+	}
 	if err := validateProviderURL(m.baseURL); err != nil {
 		return nil, err
 	}
@@ -232,5 +259,4 @@ func (s *server) completion(ctx context.Context, m aiModel, messages []chatMessa
 	return result.Choices[0].Message.Content, nil
 }
 
-// No application call budgets, conversation quotas, or model fallbacks are applied.
-// Each request carries exactly the model authorized for the current group.
+// Technical per-request budgets and concurrency slots do not impose user call quotas.

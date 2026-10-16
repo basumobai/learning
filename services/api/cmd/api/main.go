@@ -169,6 +169,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/review", s.review)
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/undo", s.undo)
 	s.extraRoutes(mux)
+	s.modelCatalogRoutes(mux)
 	s.learningRoutes(mux)
 	return s.protect(mux)
 }
