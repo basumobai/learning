@@ -44,6 +44,44 @@ case "${1:-}" in
 esac
 
 need openssl
+port_valid() {
+  [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 >= 1024 && 10#$1 <= 65535 ))
+}
+port_available() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ! ss -H -ltn "( sport = :$port )" | grep -q .
+  else
+    need python3
+    PORT_TO_TEST="$port" python3 - <<'PY'
+import os, socket, sys
+with socket.socket() as sock:
+    try:
+        sock.bind(("127.0.0.1", int(os.environ["PORT_TO_TEST"])))
+    except OSError:
+        sys.exit(1)
+PY
+  fi
+}
+choose_port() {
+  local label="$1" current="$2" selection
+  while true; do
+    if [[ -t 0 ]]; then
+      read -r -p "$label [$current]: " selection
+      selection="${selection:-$current}"
+    else
+      selection="$current"
+    fi
+    port_valid "$selection" || { [[ -t 0 ]] || die "$label 端口无效"; echo "端口需在 1024–65535 之间。"; continue; }
+    if ! port_available "$selection"; then
+      [[ -t 0 ]] || die "$label 端口 $selection 已被占用"
+      echo "端口 $selection 已占用，请换一个。"
+      continue
+    fi
+    printf '%s' "$selection"
+    return
+  done
+}
 umask 077
 new_install=0
 new_admin_password=""
@@ -60,6 +98,8 @@ if [[ ! -e "$ENV_FILE" ]]; then
 # The encryption key must remain unchanged while encrypted data exists.
 POSTGRES_PASSWORD=$database_password
 APP_ORIGIN=http://localhost:3000
+WEB_PORT=3000
+API_PORT=8080
 ELS_ADMIN_USERNAME=admin
 ELS_ADMIN_PASSWORD=$new_admin_password
 APP_ENCRYPTION_KEY=$encryption_key
@@ -76,6 +116,23 @@ else
   [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] || die ".env 必须是普通文件，拒绝覆盖符号链接。"
   chmod 600 "$ENV_FILE"
   printf '检测到现有 .env：保留全部配置与密钥。\n'
+fi
+
+if (( new_install )); then
+  web_port="$(choose_port 'Web 访问端口' "${WEB_PORT:-3000}")"
+  api_port="$(choose_port 'API 端口' "${API_PORT:-8080}")"
+  [[ "$web_port" != "$api_port" ]] || die "Web 与 API 端口不能相同"
+  sed -i "s/^WEB_PORT=.*/WEB_PORT=$web_port/; s/^API_PORT=.*/API_PORT=$api_port/; s|^APP_ORIGIN=http://localhost:3000|APP_ORIGIN=http://localhost:$web_port|" "$ENV_FILE"
+else
+  web_port="$(normalize_quoted "$(read_env WEB_PORT)")"
+  api_port="$(normalize_quoted "$(read_env API_PORT)")"
+  [[ -n "$web_port" && -n "$api_port" ]] || die "已有 .env 缺少 WEB_PORT/API_PORT，请添加自定义端口后重试"
+  port_valid "$web_port" && port_valid "$api_port" || die "端口不合法"
+fi
+[[ "$web_port" != "$api_port" ]] || die "Web 与 API 端口不可相同"
+if (( ! CONFIG_ONLY )); then
+  port_available "$web_port" || die "Web 端口 $web_port 已被占用"
+  port_available "$api_port" || die "API 端口 $api_port 已被占用"
 fi
 
 for key in POSTGRES_PASSWORD APP_ORIGIN ELS_ADMIN_USERNAME ELS_ADMIN_PASSWORD APP_ENCRYPTION_KEY; do
@@ -124,8 +181,8 @@ docker compose up --build -d || die "启动失败。使用 docker compose ps 和
 
 healthy=0
 for (( attempt=1; attempt<=45; attempt++ )); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8080/api/v1/health >/dev/null 2>&1 &&
-     curl -fsS --max-time 2 http://127.0.0.1:3000/ >/dev/null 2>&1; then
+  if curl -fsS --max-time 2 http://127.0.0.1:${api_port}/api/v1/health >/dev/null 2>&1 &&
+     curl -fsS --max-time 2 http://127.0.0.1:${web_port}/ >/dev/null 2>&1; then
     healthy=1
     break
   fi
@@ -137,6 +194,6 @@ if (( ! healthy )); then
   exit 1
 fi
 
-printf '\n安装完成！本机访问：http://localhost:3000\n'
+printf '\n安装完成！本机访问：http://localhost:${web_port}\n'
 printf '远程 VPS 请通过 SSH 隧道访问；对外开放前务必配置 HTTPS 反向代理与正确的 APP_ORIGIN。\n'
 printf '常用命令：docker compose ps | docker compose logs -f --tail=100 | docker compose down\n'
