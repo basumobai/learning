@@ -29,6 +29,13 @@ if bash "$WORK/scripts/install.sh" --config-only >"$WORK/fail.log" 2>&1; then
 fi
 grep -q 'APP_ENCRYPTION_KEY' "$WORK/fail.log"
 cp "$WORK/snapshot" "$WORK/.env"
+sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=replace-with-a-long-alphanumeric-password/' "$WORK/.env"
+if bash "$WORK/scripts/install.sh" --config-only >"$WORK/fail.log" 2>&1; then
+  echo 'accepted placeholder database password'
+  exit 1
+fi
+grep -q 'POSTGRES_PASSWORD' "$WORK/fail.log"
+cp "$WORK/snapshot" "$WORK/.env"
 
 # Simulate a full startup without touching host Docker or network.
 cat > "$WORK/fakebin/docker" <<'MOCK'
