@@ -1,10 +1,8 @@
-# 部署、升级与排障
+# 安装、更新、恢复与 HTTPS 排障
 
-Learning 默认采用 **Docker Compose + PostgreSQL + Redis + Go API + Next.js Web**。安装器只负责配置并启动本仓库的容器；不会替你安装 Docker、修改系统防火墙、打开公网端口、清理数据库或部署 HTTPS。
+需要 Docker Engine、Compose v2、Git、Python 3、OpenSSL、curl，且当前用户可执行 `docker info`。主机不需安装 Go、Node、PostgreSQL。Web/API仅绑定本机，PostgreSQL/Redis不公开端口。
 
-## 一、快速安装
-
-适用：Linux VPS / 开发机，已安装 Docker Engine、Docker Compose v2、Git、OpenSSL 与 curl，且当前用户可以执行 `docker info`。
+## 安装与部署模式
 
 ```bash
 git clone https://github.com/basumobai/learning.git
@@ -12,89 +10,124 @@ cd learning
 bash scripts/install.sh
 ```
 
-首次安装交互选择 Web/API 主机端口（默认 3000/8080，范围 1024–65535），遇到冲突可重新输入。非交互安装可使用 `WEB_PORT=3001 API_PORT=8081 bash scripts/install.sh`。只生成配置时不检查端口占用，实际启动前再检查。
-
-安装器第一次运行时生成 `.env`（权限 0600），包括独立随机数据库密码、管理员初始密码、32 字节 Base64 加密密钥；再运行 `docker compose config --quiet`、`docker compose up --build -d`，等待 Web 和数据库健康接口返回成功。
-
-管理员用户名默认 `admin`。密码首次创建时在终端显示一次，请保存并在登录后修改；**之后运行安装脚本不覆盖 `.env`，也不再次显示密码**。已有账号数据不会被环境变量中的初始密码覆盖。
-
-若需要只准备配置、不启动容器：
+首次交互选择主机端口，默认Web3000、API8080，范围1024–65535，拒绝其他业务占用的端口。首次使用正式域名：
 
 ```bash
-bash scripts/install.sh --config-only
+WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai.com
 ```
 
-安装器不会自动修复已经存在但缺少字段或密钥不合规的 `.env`，而会提示需要修正的配置，以免意外丢失既有加密数据。手工编辑请参考 [`.env.example`](../.env.example)。使用 `openssl rand -base64 32` 生成加密密钥，已有加密数据时 **绝对不能直接重新生成替换**。
+| 模式 | 行为 |
+| --- | --- |
+| 默认，未发现配置或旧卷 | 生成随机密码/加密密钥，创建权限0600的 `.env`，启动并检查健康 |
+| 默认，已有 `.env` | 保留全部配置、密钥与账号，验证当前项目端口、真实数据库认证后重启 |
+| `--update` | 必须已有 `.env`；验证后构建、应用增量迁移、启动 |
+| `--recover` | 必须恢复原配置；先检查数据库认证，不自动修改数据库密码 |
+| `--config-only` | 生成或验证配置，不启动；生成前仍需Docker检查旧卷 |
 
-## 二、访问方式与 HTTPS
+初始管理员用户名 `admin`，密码仅首次生成时显示。`ELS_ADMIN_PASSWORD` 只用于首次创建管理员，不重置已有账号。自己的密码在“设置 → 密码与登录安全”。
 
-主机端口由 .env 的 `WEB_PORT`、`API_PORT` 控制；旧配置未填写时沿用 3000/8080，不改写既有密钥。改端口时也要同步修改 `APP_ORIGIN`（或保持实际域名）。
+已有部署只编辑需修改的字段，不重新复制示例配置、不轮换 `APP_ENCRYPTION_KEY`。`--origin` 与既有配置不一致时停止，要求人工核对；安装器无法凭空推断Nginx面板里的域名。
 
-Compose 默认仅将 Web `3000` 和 API `8080` 映射到 `127.0.0.1`，数据库和 Redis 不对外映射。
+## 正式域名与 Nginx / OpenResty
 
-- 服务器本机：浏览器打开 `http://localhost:<WEB_PORT>`。
-- 从电脑连接远程 VPS：在你的电脑运行 `ssh -L <WEB_PORT>:127.0.0.1:<WEB_PORT> 用户名@服务器地址`，保持 SSH 会话，然后访问本机 `http://localhost:<WEB_PORT>`。
-- 使用域名：在服务器的 Nginx/Caddy 等 HTTPS 反向代理中，将外部站点转发到 `http://127.0.0.1:<WEB_PORT>`。将 `.env` 的 `APP_ORIGIN` 设为浏览器访问的完整 HTTPS 源地址，例如 `https://learn.example.com`（不可附加路径），随后 `docker compose up -d` 使配置生效。保持 3000、8080、PostgreSQL、Redis 的容器端口不公开。
+本次部署目录 `/www/wwwroot/learning/learning`，配置应为：
 
-浏览器请求经 Next.js 同源转发到内部 API，无需另行公开 API。上传 PDF 时，反向代理的请求体上限须覆盖题目与答案文件合计大小，建议至少 70MB，并酌情设置上传超时。只在有 HTTPS 证书、实际域名及反代正确配置后才开放公网访问。
-
-## 三、管理员首次配置
-
-登录后进入：
-
-1. `/admin` → **服务商与模型**：输入兼容 OpenAI 协议的 HTTPS URL（如 `https://openrouter.ai/api/v1`）与 API Key，添加聊天/视觉/TTS 模型。
-2. `/admin#groups` → **身份组**：可以按模型类别、服务商、名称批量开启模型权限，再到 **账户** 创建用户、分配身份组。
-3. `/admin/learning` → **AI 提示词与模型**：按题目提取、评分、讲解、作文等任务配置模型；上传题目/答案 PDF 时先检查并审核草稿后发布。
-4. **词库导入**：可粘贴或上传含单词、音标、词性、中文释义的 CSV/TSV/TXT，预览后确认。
-
-不配置第三方 AI Key 也能启动站点，但调用 AI 与 TTS 前需要有效模型。平台不限制调用次数，但第三方服务商可能计费。
-
-## 四、日常运维与备份
-
-```bash
-docker compose ps
-docker compose logs --tail=100
-docker compose logs -f --tail=100
-docker compose restart
+```dotenv
+APP_ORIGIN=https://www.sumobai.com
+WEB_PORT=9090
+API_PORT=9009
 ```
 
-更新前先备份（命令在仓库根目录执行）：
+保留原数据库密码、管理员引导密码与加密密钥。修改域名后运行：
 
 ```bash
+bash scripts/install.sh --recover --origin https://www.sumobai.com
+```
+
+Nginx/OpenResty HTTPS站点示例（证书路径替换为面板生成的实际路径）：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name www.sumobai.com;
+    ssl_certificate /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+    client_max_body_size 70m;
+    location / {
+        proxy_pass http://127.0.0.1:9090;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 180s;
+        proxy_send_timeout 180s;
+    }
+}
+```
+
+全部请求（包括 `/api/v1/`）转发到Web9090，再由Web转发到内部API8080，无需把公网API另行指向9009。若Nginx自身在容器内，`127.0.0.1` 指向Nginx容器，应改为能访问宿主机Web端口的受控网络地址。
+
+80端口可另设301跳转HTTPS。检查和重载使用面板或该实例对应的Nginx命令，不关闭其他站点。
+
+来源校验使用配置中的唯一公开源地址，并保留浏览器 `Origin`。Host和转发头用于路由，不扩大允许的来源范围；后端不根据任意转发头决定Cookie的Secure属性。HTTPS使用 `__Host-`、Secure、HttpOnly、SameSite=Strict会话Cookie，写操作继续需要CSRF Token。不配置通配CORS、不关闭来源验证。
+
+## 数据库密码冲突与缺失配置
+
+`pg_isready` 只能证明数据库进程可连接，不能验证密码。官方镜像的容器内本机TCP也可能免密；安装器用 `.env` 密码经Compose网络地址 `postgres` 执行 `SELECT 1`，避免本机信任规则造成误判。失败即停止，不重建卷、不自动执行 `ALTER ROLE`。
+
+**旧卷存在但 `.env` 丢失：** 从原部署或加密备份恢复完整 `.env`，尤其原 `APP_ENCRYPTION_KEY`。不能生成替代密钥来修复旧库；原加密密钥丢失后，已有API Key/TOTP密文不能直接恢复，需先备份，再规划人工恢复。
+
+**配置存在但密码不匹配：** 优先恢复与数据库匹配的原密码。若确定需人工同步，先备份数据库和原配置，在自己管理的服务器进入交互终端：
+
+```bash
+docker compose exec postgres psql -U els -d els
+```
+
+在psql中执行 `\password els`，按提示输入与 `.env` 对应的新密码，再 `\q` 退出。不要把密码拼进SQL命令行、聊天或日志。然后运行 `bash scripts/install.sh --recover`。禁用本地信任认证的实例需按自己的数据库管理员认证策略恢复。
+
+**目录或项目名变动：** 安装器检查 `postgres_data` 标签与同名后缀卷。若当前项目将使用不同卷，则停止。用 `docker volume ls --filter label=com.docker.compose.volume=postgres_data` 核对元数据，恢复原目录或在 `.env` 设置原 `COMPOSE_PROJECT_NAME`；不要删除旧卷绕过检查。
+
+配置检查使用 `docker compose config --quiet`，不要公开完整配置输出。
+
+## 更新、备份与健康检查
+
+在仓库根目录备份数据库：
+
+```bash
+umask 077
 docker compose exec -T postgres pg_dump -U els -d els --format=custom > els-backup.dump
 ```
 
-同时**单独安全备份 `.env`，尤其是 `APP_ENCRYPTION_KEY`**。数据库备份应妥善加密存放并定期验证可恢复性；不要上传到公开仓库。恢复需在隔离环境演练后执行，不推荐直接覆盖正在运行的数据库。
-
-更新已部署的仓库：
+单独安全备份完整 `.env` 和PDF原始资料目录，不提交到Git。数据库内含账号、AI密文、PDF快照与练习历史。定期在隔离实例验证备份可恢复性。
 
 ```bash
 git pull --ff-only
-docker compose up --build -d
+bash scripts/install.sh --update
+docker compose ps
 ```
 
-上述操作保留数据库卷和现有 `.env`，API 启动时自动执行尚未应用的数据库迁移。旧库升级仍建议先备份。停止容器使用 `docker compose down`；**不要添加 `-v`**，否则会删除本项目数据库卷。
+更新使用增量迁移，不重建卷/账号或替换密钥。停止使用 `docker compose down`，**不要加 `-v`**。
 
-## 五、常见问题
-
-| 症状 | 优先检查 |
-| --- | --- |
-| `docker: command not found` | 安装 Docker Engine，确认 `docker compose version` 为 v2 |
-| `Cannot connect to the Docker daemon` | Docker 服务状态以及当前用户是否有 Docker 权限 |
-| 端口 `3000` / `8080` 被占用 | `docker compose ps` 与宿主端口监听状况，勿直接关闭其他业务 |
-| `.env` 缺失、密码过短或密钥无效 | 只修改报错项；已有加密记录时禁止替换原密钥 |
-| 页面打不开 | `docker compose ps`，然后分别检查 Web 和 API 日志 |
-| API 健康检查失败 | `docker compose logs api postgres --tail=100`，核查数据库密码与迁移错误 |
-| 登录或 CSRF 异常 | 检查 `APP_ORIGIN` 与浏览器访问源是否完全相同；反代是否使用 HTTPS |
-| 模型无权限 | 模型及服务商是否启用、账号所属身份组是否授权 |
-| 运行脚本后已有管理员密码没变 | 正常行为：初始密码只用于首次引导，不用于重置老账号 |
-
-健康接口（替换为实际 API_PORT）：`curl -fsS http://127.0.0.1:<API_PORT>/api/v1/health`。
-
-安装脚本的隔离测试（无需 Docker 或真实 API Key）：
+核心服务都有健康检查与 `unless-stopped` 策略。Web等待API健康，API等待数据库和Redis健康。API暂时不可用时Web显示中文503提示，不暴露内部错误、不自动重放写请求；后续请求可重新连接。读取账号失败时，依次等待15、30、60秒自动重连，最多3次；期间不跳转登录页，超过次数仍保留手动重连入口。健康状态本身不会重启仍存活的进程，API进程退出才由Docker策略重启。
 
 ```bash
-bash scripts/test-install.sh
+curl -fsS http://127.0.0.1:9009/api/v1/health
+curl -fsS http://127.0.0.1:9090/api/v1/health
+docker compose logs api postgres --tail=100
 ```
 
-完整安全细节见 [SECURITY](SECURITY.md)；应用与多学科学习流程见 [LEARNING](LEARNING.md)。
+## 常见问题
+
+| 症状 | 恢复 |
+| --- | --- |
+| 缺失配置且发现旧卷 | 恢复完整配置和项目名，禁止重新初始化 |
+| `28P01` / 数据库认证失败 | 按上文安全同步，不删除卷 |
+| 端口占用 | 修改对应端口；同一Compose项目的原映射可复用 |
+| 来源与配置不一致 | 对照浏览器scheme/域名/端口与APP_ORIGIN，再检查反代头 |
+| 页面存在但API不可用 | 查看四服务健康，先定位数据库/API，再重试Web |
+| PDF目录不可读 | 创建 `data/pdf/` 并允许容器读取；自定义挂载后重建API |
+| OCR/提取失败 | 配置对应任务模型，查看逐页结果和失败任务；已完成OCR页保留 |
+| 录音不可用 | 使用HTTPS并允许麦克风，也可填写英文作答 |
+
+安装器隔离测试：`bash scripts/test-install.sh`。完整CI包括PostgreSQL17、Go race、Web构建/浏览器和Compose集成。验证记录见 [DEPLOYMENT_VALIDATION](DEPLOYMENT_VALIDATION.md)。

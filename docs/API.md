@@ -1,5 +1,7 @@
 # API v1
 
+教材归档扩展：`GET /learning/catalog` 的学科项增加 `exam`、`curriculum`、`published_counts`，章节增加 `edition`、`volume`、`curriculum_chapter`。新PDF导入先排队 `identify`，`subject_id` 可留空；手动提供的科目仅作线索。管理员使用 `POST /admin/learning/documents/{id}/scope`，提交 `{subject_id,edition,volume,term,admin_password}` 确认归属，随后排队章节任务。确认前禁止目录/题目提取；运行中或重复确认返回409。英语版本仅允许北师大版2019。练习请求可按 `edition`、`volume` 与原有教材/学期/章节字段共同过滤。详见 [教材与题型](CURRICULUM.md)。
+
 Next.js 同源 `/api/v1` 转发到 Go。除 GET /health 和 POST /auth/login 外均需会话 Cookie。写入携带 `X-CSRF-Token`，无 Origin 的程序客户端还需 `X-ELS-Client:web`；Origin 必须匹配 APP_ORIGIN。
 
 ## 身份、账户、内容
@@ -96,3 +98,18 @@ request_id 为 8–128 位字母/数字/下划线/连字符。AI 同一编号相
 `/explanation` 的 `reason` 为 `incorrect`（默认）或 `self_report`，前者要求已确认失分，后者是学生主动求助。两种都要求已交卷；未交卷403，未判错且非主动求助409。练习响应含 `explanation_needed`，前端只在它为true时自动请求。`jobs` 包含本人该次评分和讲解任务，刷新可恢复，不重新生成。不同作答、模型或提示词版本不共用讲解。
 
 失败评分 `/jobs/{id}/retry` 可携带新的 `model_selection`/`personal`，重新验证并保存模型快照；讲解重试使用空对象保留原快照，更换讲解模型应再次请求 `/explanation`。
+
+## 注册、服务器资料与听说补充
+
+| 接口 | 用途 |
+| --- | --- |
+| GET `/auth/options` | 公共注册开关，不返回账号信息 |
+| POST `/auth/register` | username/display_name/password；严格来源校验，固定learner角色 |
+| GET/POST `/admin/registration` | 管理员读取/修改注册开关、默认身份组；写操作需再次验证密码 |
+| GET `/admin/learning/local-files` | 列出只读资料目录第一层PDF、大小和当前挂载来源 |
+| POST `/admin/learning/local-import` | 题目/答案文件名与元数据；路径受目录约束，需管理员密码 |
+| GET `/admin/learning/documents/{id}/ocr` | 各页文字、原生/OCR来源与不确定说明 |
+| POST `/admin/learning/documents/{id}/ocr` | 单独排队待处理扫描页，需管理员密码 |
+| POST `/ai/training/{id}/feedback` | 已交卷听说文字逐项评价，model_id/request_id；身份组授权与幂等 |
+
+`POST /ai/training`增加format：choice/guangdong_a/guangdong_b/guangdong_c，以及focus训练重点。旧请求不传format继续生成基础选择题。听说提交增加responses字符串数组与notes；基础选择题仍用answers整数数组。语音请求可带segment=source、reply-0等或question-3等，仅播放对应听力片段，不提供参考答案朗读。

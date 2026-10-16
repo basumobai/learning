@@ -5,6 +5,8 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/.env"
 CONFIG_ONLY=0
+MODE=auto
+EXPECTED_ORIGIN="${APP_ORIGIN:-}"
 
 usage() {
   cat <<'HELP'
@@ -12,9 +14,13 @@ Learning installer (run from any directory)
 
   bash scripts/install.sh                 Generate .env if absent and start Docker Compose
   bash scripts/install.sh --config-only   Generate/validate .env without starting Docker
+  bash scripts/install.sh --origin https://www.sumobai.com
+  bash scripts/install.sh --update        Upgrade an existing configured installation
+  bash scripts/install.sh --recover       Check credentials before restarting services
   bash scripts/install.sh --help          Show this help
 
-Requires Docker Engine, Docker Compose v2, OpenSSL and curl for full install.
+Requires Docker Engine, Docker Compose v2, Python 3, OpenSSL and curl for full install.
+Even --config-only checks Docker volumes before generating new secrets.
 Existing .env, database volumes and accounts are never reset.
 The app binds only to 127.0.0.1 by default; use an SSH tunnel for remote access.
 HELP
@@ -35,15 +41,52 @@ normalize_quoted() {
   printf '%s' "$v"
 }
 
-if (( $# > 1 )); then usage >&2; exit 2; fi
-case "${1:-}" in
-  "") ;;
-  --config-only) CONFIG_ONLY=1 ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
+while (( $# )); do
+  case "$1" in
+    --config-only) CONFIG_ONLY=1; shift ;;
+    --update) MODE=update; shift ;;
+    --recover) MODE=recover; shift ;;
+    --origin) (( $# >= 2 )) || die "--origin 缺少域名"; EXPECTED_ORIGIN="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
 
 need openssl
+need python3
+validate_origin() {
+  ORIGIN_TO_CHECK="$1" python3 - <<'PY'
+import os, urllib.parse
+raw = os.environ['ORIGIN_TO_CHECK']
+try:
+    u = urllib.parse.urlsplit(raw)
+    valid = (u.scheme in ('http', 'https') and bool(u.hostname) and not u.username
+             and not u.password and u.path in ('', '/') and not u.query and not u.fragment
+             and u.port != 0 and not any(c.isspace() for c in raw)
+             and not any(c in u.netloc for c in ('\\', '%'))
+             and (u.scheme == 'https' or u.hostname in ('localhost', '127.0.0.1')))
+except ValueError:
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
+}
+[[ -z "$EXPECTED_ORIGIN" ]] || validate_origin "$EXPECTED_ORIGIN" || die "指定来源无效，必须是单一 HTTPS 域名（本机允许 HTTP）；未生成配置。"
+need docker
+docker info >/dev/null 2>&1 || die "Docker 不可用，无法安全判断旧数据库是否存在；请启动 Docker 并确认当前用户权限后重试。未生成新密钥。"
+docker compose version >/dev/null 2>&1 || die "需要 Docker Compose v2 插件。"
+cd "$ROOT"
+# Do not render Compose before .env is recovered: required secrets may be absent.
+# Include orphaned/renamed projects so moving a checkout cannot silently strand data.
+volume_names="$(docker volume ls --format '{{.Name}}' 2>/dev/null)" || die "无法检查数据库卷；未生成新密钥。"
+labelled_volumes="$(docker volume ls --filter label=com.docker.compose.volume=postgres_data --format '{{.Name}}' 2>/dev/null)" || die "无法检查数据库卷标签。"
+has_database=0
+if [[ -n "$labelled_volumes" ]] || [[ "$volume_names" =~ (^|$'\n')([a-zA-Z0-9_.-]+_)?postgres_data($|$'\n') ]]; then
+  has_database=1
+fi
+if [[ ! -e "$ENV_FILE" ]]; then
+  (( ! has_database )) || die "检测到已有 PostgreSQL 数据卷，但缺失 .env。已停止，未生成密码/加密密钥。请从原部署或备份恢复完整 .env（尤其 POSTGRES_PASSWORD、APP_ENCRYPTION_KEY），确认原 Compose 项目名后运行 --recover。不要删除卷。详见 docs/DEPLOY.md。"
+  [[ "$MODE" == auto ]] || die "--$MODE 需要原有 .env；请先恢复配置，不能当作全新安装。"
+fi
 port_valid() {
   [[ "$1" =~ ^[1-9][0-9]{3,4}$ ]] && (( $1 >= 1024 && $1 <= 65535 ))
 }
@@ -106,7 +149,7 @@ if [[ ! -e "$ENV_FILE" ]]; then
 # Generated locally. Do not commit this file or share it.
 # The encryption key must remain unchanged while encrypted data exists.
 POSTGRES_PASSWORD=$database_password
-APP_ORIGIN=http://localhost:$web_port
+APP_ORIGIN=${EXPECTED_ORIGIN:-http://localhost:$web_port}
 WEB_PORT=$web_port
 API_PORT=$api_port
 ELS_ADMIN_USERNAME=admin
@@ -144,6 +187,14 @@ for key in POSTGRES_PASSWORD APP_ORIGIN ELS_ADMIN_USERNAME ELS_ADMIN_PASSWORD AP
   [[ -n "$value" ]] || die ".env 的 $key 缺失或为空；请先填写有效配置。"
 done
 
+app_origin="$(normalize_quoted "$(read_env APP_ORIGIN)")"
+validate_origin "$app_origin" || die "APP_ORIGIN 必须是单一 HTTPS 域名（本机允许 HTTP），不能带路径、查询或用户信息。"
+[[ -z "$EXPECTED_ORIGIN" || "${EXPECTED_ORIGIN%/}" == "${app_origin%/}" ]] || die "指定域名与 .env 的 APP_ORIGIN 不一致。请核对正式域名后仅修改 APP_ORIGIN，再重新运行；原有密钥未覆盖。"
+if [[ "$app_origin" == http://localhost:* && "$app_origin" != "http://localhost:$web_port" ]]; then
+  die "APP_ORIGIN 的本机端口与 WEB_PORT 不一致，请核对 .env。"
+fi
+printf '访问来源：%s（必须与浏览器地址一致）\n' "$app_origin"
+
 db_password="$(normalize_quoted "$(read_env POSTGRES_PASSWORD)")"
 admin_password="$(normalize_quoted "$(read_env ELS_ADMIN_PASSWORD)")"
 encryption_key="$(normalize_quoted "$(read_env APP_ENCRYPTION_KEY)")"
@@ -161,7 +212,11 @@ if ! key_bytes="$(printf '%s' "$encryption_key" | openssl base64 -d -A 2>/dev/nu
 fi
 [[ "$key_bytes" == "32" ]] ||
   die "APP_ENCRYPTION_KEY 必须是 Base64 编码的 32 字节密钥；不要随意更换旧密钥。"
-unset db_password admin_password encryption_key key_bytes
+# .env is authoritative; ignore unrelated exported credentials from this shell.
+export POSTGRES_PASSWORD="$db_password" ELS_ADMIN_PASSWORD="$admin_password"
+export APP_ENCRYPTION_KEY="$encryption_key" APP_ORIGIN="$app_origin"
+export ELS_ADMIN_USERNAME="$(normalize_quoted "$(read_env ELS_ADMIN_USERNAME)")"
+unset admin_password encryption_key key_bytes
 
 if (( new_install )); then
   printf '\n管理员：admin\n初始密码（仅本次显示，请立即安全保存）：%s\n' "$new_admin_password"
@@ -174,12 +229,20 @@ if (( CONFIG_ONLY )); then
   exit 0
 fi
 
-need docker
 need curl
-docker info >/dev/null 2>&1 || die "Docker 守护进程不可用，或当前用户无访问权限。"
-docker compose version >/dev/null 2>&1 || die "需要 Docker Compose v2 插件（使用 docker compose，而非 docker-compose）。"
-cd "$ROOT"
-docker compose config --quiet || die "Compose 配置校验失败；请检查 .env。"
+pdf_directory="$(normalize_quoted "$(read_env LEARNING_PDF_DIR)")"
+pdf_directory="${pdf_directory:-${LEARNING_PDF_DIR:-./data/pdf}}"
+if [[ "$pdf_directory" == './data/pdf' ]]; then
+  mkdir -p -m 755 "$ROOT/data/pdf" || die "无法创建默认 PDF 目录 data/pdf，请检查部署目录权限。"
+fi
+docker compose config --quiet >/dev/null 2>&1 || die "Compose 配置校验失败；请核对 .env 的字段和 docs/DEPLOY.md（不要公开配置输出）。"
+# Refuse an accidental project rename when known data belongs to a different project.
+expected_volume="$(docker compose config --format json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["volumes"]["postgres_data"]["name"])' 2>/dev/null)" || die "无法识别当前 Compose 数据卷，请检查项目配置。"
+if (( has_database )); then
+  if ! printf '%s\n' "$volume_names" | grep -Fxq -- "$expected_volume"; then
+    die "检测到旧数据库，但当前项目将使用不同的数据卷。请恢复原 COMPOSE_PROJECT_NAME 或在原部署目录运行；未创建新数据库。"
+  fi
+fi
 check_service_port() {
   local service="$1" container_port="$2" host_port="$3" published
   # A running service belonging to THIS Compose project may reuse its mapping.
@@ -190,12 +253,27 @@ check_service_port() {
 check_service_port web 3000 "$web_port"
 check_service_port api 8080 "$api_port"
 printf '正在启动 Learning 服务…\n'
+printf '部署模式：%s；数据库与密钥保留。\n' "$MODE"
+docker compose up -d postgres redis || die "数据库/缓存启动失败；请检查 Docker 磁盘空间和容器状态。"
+database_ready=0
+for (( attempt=1; attempt<=30; attempt++ )); do
+  if docker compose exec -T postgres pg_isready -h postgres -U els -d els >/dev/null 2>&1; then database_ready=1; break; fi
+  sleep 2
+done
+(( database_ready )) || die "PostgreSQL 未就绪；请检查 docker compose ps 与数据库日志，不要删除卷。"
+# Use the Compose network address: the official image trusts both Unix sockets and
+# loopback TCP, so even psql -h 127.0.0.1 would accept a mismatched password.
+# Pass the secret through stdin, never as a process argument or diagnostic output.
+if ! printf '%s\n' "$db_password" | docker compose exec -T postgres sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -h postgres -U els -d els -w -tAc "SELECT 1"' >/dev/null 2>&1; then
+  die "数据库认证检查失败（密码不一致、数据库缺失或 TCP 认证配置异常）。未重建数据库或轮换密钥。先恢复原 .env；如需人工同步密码，运行 docker compose exec postgres psql -U els -d els，再使用交互式 \\password els，详见 docs/DEPLOY.md。"
+fi
+unset db_password
 docker compose up --build -d || die "启动失败。使用 docker compose ps 和 docker compose logs --tail=100 查看原因。"
 
 healthy=0
 for (( attempt=1; attempt<=45; attempt++ )); do
   if curl -fsS --max-time 2 http://127.0.0.1:${api_port}/api/v1/health >/dev/null 2>&1 &&
-     curl -fsS --max-time 2 http://127.0.0.1:${web_port}/ >/dev/null 2>&1; then
+     curl -fsS --max-time 2 http://127.0.0.1:${web_port}/api/v1/health >/dev/null 2>&1; then
     healthy=1
     break
   fi

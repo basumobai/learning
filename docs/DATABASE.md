@@ -34,3 +34,7 @@ migration 按文件版本逐个事务执行，默认路径 /app/migrations，可
 资料与插图直接存PostgreSQL，数据库备份覆盖完整资料；加密密钥仍须另行安全备份。目录扫描进度分批持久化。已发布题目才进入学生筛选；每次作答绑定题目版本，管理员修订不会覆盖原作答记录，旧版本练习当前要求重新选题。后台工作按owner、kind、dedupe_key去重，短事务领取、外部调用、结果落库；截止时间与成绩由服务端控制。
 
 `0005_learning_model_preferences.sql` 增加 `learning_model_preferences`，按user_id保存模型ID偏好；不复制服务商密钥。工作队列payload保存该次助学/作文模型选择与接口配置指纹，执行前后重新核验授权。讲解仅在提交后的判错/主动求助触发，缓存包含attempt_id，避免不同作答的错因混用。
+
+## 0006 增量迁移
+
+新增account_policy（注册开关与默认身份组）、registration_attempts（认证安全限流）。learning_pages新增text_source和ocr_notes，learning_documents新增可空唯一source_fingerprint去重，training_sessions新增speaking_feedback。已有账号、权限组、学习历史与AI密文保留；不轮换环境密钥、不重建卷。

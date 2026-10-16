@@ -4,6 +4,10 @@ import "net/http"
 
 func (s *server) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
+	mux.HandleFunc("POST /api/v1/auth/register", s.register)
+	mux.HandleFunc("GET /api/v1/auth/options", s.registrationOptions)
+	mux.HandleFunc("GET /api/v1/admin/registration", s.registrationPolicy)
+	mux.HandleFunc("POST /api/v1/admin/registration", s.saveRegistrationPolicy)
 	mux.HandleFunc("GET /api/v1/auth/me", s.me)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("POST /api/v1/auth/password", s.password)
@@ -31,6 +35,7 @@ func (s *server) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/ai/training", s.trainingHistory)
 	mux.HandleFunc("GET /api/v1/ai/training/{id}", s.training)
 	mux.HandleFunc("POST /api/v1/ai/training/{id}/answers", s.listeningAnswer)
+	mux.HandleFunc("POST /api/v1/ai/training/{id}/feedback", s.speakingFeedback)
 	mux.HandleFunc("POST /api/v1/ai/training/{id}/speech", s.trainingSpeech)
 	mux.HandleFunc("POST /api/v1/ai/speech", s.speech)
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/questions/{question}/speech", s.questionSpeech)

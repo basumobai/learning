@@ -2,11 +2,20 @@
 # No Docker/network needed: test setup against isolated temporary fixtures.
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+REAL_INSTALLER_PATH="$PATH"
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
 mkdir -p "$WORK/scripts" "$WORK/fakebin"
 cp "$ROOT/scripts/install.sh" "$WORK/scripts/install.sh"
 cp "$ROOT/.env.example" "$WORK/.env.example"
+cat > "$WORK/fakebin/docker" <<'MOCK'
+#!/usr/bin/env bash
+[[ -z "${MOCK_DOCKER_LOG:-}" ]] || printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
+if [[ "$*" == 'compose config --format json' ]]; then echo '{"volumes":{"postgres_data":{"name":"fixture_postgres_data"}}}'; fi
+exit 0
+MOCK
+chmod +x "$WORK/fakebin/docker"
+export PATH="$WORK/fakebin:$PATH"
 bash -n "$WORK/scripts/install.sh"
 bash "$WORK/scripts/install.sh" --help >/dev/null
 first="$(bash "$WORK/scripts/install.sh" --config-only)"
@@ -42,6 +51,8 @@ cat > "$WORK/fakebin/docker" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
 if [[ "$1" == info ]]; then exit 0; fi
+if [[ "$1 $2" == 'volume ls' ]]; then exit 0; fi
+if [[ "$*" == 'compose config --format json' ]]; then echo '{"volumes":{"postgres_data":{"name":"fixture_postgres_data"}}}'; exit 0; fi
 if [[ "$1" == compose ]]; then exit 0; fi
 exit 1
 MOCK
@@ -63,3 +74,6 @@ cmp "$WORK/.env" "$WORK/snapshot"
 echo 'Installer checks passed: generated secrets, permissions, idempotence, invalid key rejection, Compose flow.'
 
 python3 "$ROOT/scripts/test_install_ports.py" -v
+if [[ "${GITHUB_ACTIONS:-}" == true ]] && PATH="$REAL_INSTALLER_PATH" docker info >/dev/null 2>&1; then
+  PATH="$REAL_INSTALLER_PATH" bash "$ROOT/scripts/test-install-compose.sh"
+fi

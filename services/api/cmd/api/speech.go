@@ -17,6 +17,7 @@ type speechInput struct {
 	ModelID       int64  `json:"model_id"`
 	Voice         string `json:"voice"`
 	Input         string `json:"input"`
+	Segment       string `json:"segment,omitempty"`
 	pronunciation string
 }
 
@@ -168,6 +169,10 @@ func (s *server) trainingSpeech(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "training transcript", err)
 		return
 	}
-	input.Input = lesson.Transcript
+	input.Input, err = speakingSegment(lesson, input.Segment)
+	if err != nil {
+		fail(w, 400, "听力音频片段无效")
+		return
+	}
 	s.speechResponse(w, r, input)
 }

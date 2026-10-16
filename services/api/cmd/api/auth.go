@@ -116,10 +116,10 @@ func (s *server) protect(next http.Handler) http.Handler {
 		}
 		unsafe := r.Method != "GET" && r.Method != "HEAD"
 		if unsafe && !s.sameOrigin(r) {
-			fail(w, 403, "请求来源无效")
+			fail(w, 403, "请求来源与站点配置不一致，请从正确域名访问；若仍失败，请联系管理员核对访问域名配置")
 			return
 		}
-		if r.URL.Path == "/api/v1/auth/login" {
+		if r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/api/v1/auth/register" || r.URL.Path == "/api/v1/auth/options" {
 			next.ServeHTTP(w, r)
 			return
 		}

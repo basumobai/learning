@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { api } from "../../lib/api";
 import { useAuth } from "../providers";
 import { Icon } from "../icons";
+import Link from "next/link";
 
 export default function Login() {
   const auth = useAuth();
@@ -147,7 +148,9 @@ export default function Login() {
           </p>
         )}
         <p className="setting-note">
-          账户由管理员创建。忘记密码或丢失验证器时，请联系管理员重置。
+          <Link href="/register">没有账号？创建自己的账户</Link>
+          。忘记密码或丢失验证器时，请联系管理员重置；登录后可在“设置 →
+          密码与登录安全”修改密码。
         </p>
       </section>
     </main>

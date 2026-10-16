@@ -106,7 +106,12 @@ export async function installMockAPI(context, options = {}) {
       });
       return;
     }
-    if (p === "/auth/me")
+    if (p === "/admin/learning/local-files")
+      data = { files: [], host_directory: "./data/pdf" };
+    else if (p === "/auth/options") data = { registration_open: true };
+    else if (p === "/admin/registration")
+      data = { registration_open: true, default_group_id: 1 };
+    else if (p === "/auth/me")
       data = {
         user: {
           id: "test",
@@ -428,6 +433,50 @@ export async function installMockAPI(context, options = {}) {
         encryption_ready: true,
         reviewer_models: [],
       };
+    if (p === "/learning/catalog" && options.curriculum) {
+      const english = data.subjects.find((s) => s.id === "english");
+      english.curriculum = {
+        edition: "北师大版2019",
+        edition_locked: true,
+        volumes: [
+          "必修第一册",
+          "必修第二册",
+          "必修第三册",
+          "选择性必修第一册",
+          "选择性必修第二册",
+          "选择性必修第三册",
+          "选择性必修第四册",
+          "综合复习",
+        ],
+        note: "固定北师大版2019；册次、Unit和Lesson分别核对。",
+      };
+      english.published_counts = { reading: 12 };
+      english.exam = {
+        region: "广东",
+        policy_year: 2026,
+        minutes: 120,
+        points: 150,
+        paper: "全国卷笔试 + 广东英语听说",
+        sections: [
+          { name: "阅读", kinds: ["reading"], note: "保留语篇与题组。" },
+          { name: "写作", kinds: [], note: "应用文与读后续写。" },
+          {
+            name: "听说（单独考试）",
+            kinds: [],
+            note: "A朗读、B三问五答、C复述。",
+          },
+        ],
+        note: "细分标签不是固定题号；以当年正式试卷为准。",
+        sources: [
+          "https://szeb.sz.gov.cn/attachment/1/1713/1713627/12781791.pdf",
+        ],
+      };
+      Object.assign(data.chapters[0], {
+        edition: "北师大版2019",
+        volume: "选择性必修第一册",
+        curriculum_chapter: "Unit 1 Relationships",
+      });
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",

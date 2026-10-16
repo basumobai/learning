@@ -1,4 +1,7 @@
 "use client";
+import { ServerPDFInbox, DocumentOCR } from "../../components/ServerPDFInbox";
+import { DocumentScope } from "../../components/DocumentScope";
+import type { Recognition } from "../../../lib/curriculum";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, upload, type Model } from "../../../lib/api";
@@ -20,6 +23,8 @@ type Chapter = {
   question_pages: number[];
   answer_pages: number[];
   note: string;
+  volume?: string;
+  curriculum_chapter?: string;
 };
 type Doc = {
   id: string;
@@ -27,6 +32,10 @@ type Doc = {
   subject_id: string;
   textbook: string;
   term: string;
+  edition?: string;
+  volume?: string;
+  scope_confirmed?: boolean;
+  recognition?: Recognition | null;
   outline: { chapters: Chapter[] } | null;
   jobs: { id: string; kind: string; status: string; error: string }[] | null;
 };
@@ -110,6 +119,11 @@ export default function AdminLearning() {
       api<{ connections: Cloud[] }>("/admin/learning/cloud"),
     ]);
     setDocuments(d.documents);
+    setDoc((current) =>
+      current
+        ? d.documents.find((row) => row.id === current.id) || current
+        : null,
+    );
     setTasks(t.tasks);
     setDefaults(t.defaults);
     setModels(c.models.filter((m) => m.kind === "chat"));
@@ -169,7 +183,7 @@ export default function AdminLearning() {
           <span className="eyebrow">LEARNING · 管理工作台</span>
           <h1>把资料，变成可理解的知识。</h1>
           <p>
-            识别目录 → 选择小节 → 审核题目与答案 →
+            识别学科与教材 → 确认册次 → 识别章节 → 审核题目与答案 →
             发布。动态讲解在交卷答错或主动求助后生成。
           </p>
         </header>
@@ -228,7 +242,7 @@ export default function AdminLearning() {
           <section className="panel glass">
             <h2>每个用途，单独配置。</h2>
             <p>
-              学生调用平台模型仍受权限组控制。作文需要至少两个独立评审模型与一个主审。PDF识别请选择视觉模型。
+              学生调用平台模型仍受权限组控制。PDF流程分为扫描页OCR、目录识别、题干提取、答案提取、题答配对；各任务可独立配置提示词和模型。OCR与图文提取需支持视觉输入的模型，题答配对可用文本模型。旧“题目与答案入库”配置仅保留作为升级参考。
             </p>
             <label>
               任务
@@ -281,7 +295,15 @@ export default function AdminLearning() {
                 >
                   恢复默认提示词
                 </button>
-                {["outline", "extract"].includes(task.task) && (
+                {[
+                  "outline",
+                  "extract",
+                  "ocr",
+                  "classify_document",
+                  "extract_questions",
+                  "extract_answers",
+                  "match_answers",
+                ].includes(task.task) && (
                   <>
                     <label>
                       入库方式
@@ -372,6 +394,7 @@ export default function AdminLearning() {
         )}
         {tab === "documents" && (
           <>
+            <ServerPDFInbox password={password} onImported={load} />
             <section className="panel glass">
               <h2>题目与答案 PDF</h2>
               <p className="setting-note">
@@ -399,7 +422,9 @@ export default function AdminLearning() {
                       });
                     }
                     await load();
-                    setNotice("文件已接收，目录识别已排队。");
+                    setNotice(
+                      "文件已接收，自动归类已排队。请选择资料核对学科、版本与册次。",
+                    );
                   });
                 }}
               >
@@ -411,6 +436,7 @@ export default function AdminLearning() {
                   <label>
                     科目
                     <select name="subject_id">
+                      <option value="">自动识别学科与教材（推荐）</option>
                       {subjects.map((s) => (
                         <option key={s.id} value={s.id}>
                           {s.name}
@@ -422,7 +448,7 @@ export default function AdminLearning() {
                     教材／册次
                     <input
                       name="textbook"
-                      placeholder="北师大版2019 选择性必修一"
+                      placeholder="自动识别可留空；英语固定北师大版2019"
                     />
                   </label>
                   <label>
@@ -495,7 +521,7 @@ export default function AdminLearning() {
                   </>
                 )}
                 <button className="primary" disabled={busy || !password}>
-                  接收文件并识别目录
+                  接收文件并识别资料
                 </button>
               </form>
             </section>
@@ -515,7 +541,10 @@ export default function AdminLearning() {
                       {d.title}
                     </button>
                     <small>
-                      {d.textbook} · {d.term}
+                      {d.scope_confirmed === false
+                        ? "学科与教材待确认"
+                        : d.textbook || "旧资料待核对教材"}{" "}
+                      · {d.term}
                     </small>
                     {d.jobs?.map((j) => (
                       <p className="setting-note" key={j.id}>
@@ -540,6 +569,21 @@ export default function AdminLearning() {
               </div>
               {doc && (
                 <>
+                  <DocumentOCR id={doc.id} password={password} />
+                  {doc.scope_confirmed === false && (
+                    <DocumentScope
+                      key={doc.id}
+                      id={doc.id}
+                      recognition={doc.recognition}
+                      password={password}
+                      pending={
+                        !!doc.jobs?.some((j) =>
+                          ["queued", "running"].includes(j.status),
+                        )
+                      }
+                      onConfirmed={load}
+                    />
+                  )}
                   <p>
                     核对物理页码（从1开始）。答案页不确定时，请人工补齐。目录完成后重新选择资料。
                   </p>
@@ -562,6 +606,43 @@ export default function AdminLearning() {
                         </span>
                       </label>
                       <div className="learning-filters">
+                        <label>
+                          教材册次
+                          <input
+                            value={c.volume || ""}
+                            placeholder={doc.volume || "不确定留空"}
+                            maxLength={80}
+                            onChange={(e) =>
+                              setOutline((v) =>
+                                v.map((x, j) =>
+                                  i === j
+                                    ? { ...x, volume: e.target.value }
+                                    : x,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          教材章／Unit
+                          <input
+                            value={c.curriculum_chapter || ""}
+                            placeholder="按原目录核对；不是题型名"
+                            maxLength={200}
+                            onChange={(e) =>
+                              setOutline((v) =>
+                                v.map((x, j) =>
+                                  i === j
+                                    ? {
+                                        ...x,
+                                        curriculum_chapter: e.target.value,
+                                      }
+                                    : x,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
                         <label>
                           小节名称
                           <input
@@ -626,7 +707,12 @@ export default function AdminLearning() {
                   </button>
                   <button
                     className="primary"
-                    disabled={busy || !password || !picked.length}
+                    disabled={
+                      busy ||
+                      !password ||
+                      !picked.length ||
+                      doc.scope_confirmed === false
+                    }
                     onClick={() =>
                       void run(async () => {
                         await api(

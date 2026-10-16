@@ -4,11 +4,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, authState, setCSRF, type User } from "../lib/api";
+import { api, APIError, authState, setCSRF, type User } from "../lib/api";
 import { Icon, type IconName } from "./icons";
 import { ViewportFrame } from "./components/ViewportFrame";
 
@@ -20,22 +21,63 @@ const AuthContext = createContext<{
 export function Providers({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState("");
+  const refreshing = useRef(false);
   const refresh = useCallback(async () => {
+    if (refreshing.current) return;
+    refreshing.current = true;
     try {
       setUser((await authState()).user);
-    } catch {
-      setUser(null);
+      setError("");
+    } catch (e) {
+      if (e instanceof APIError && e.status === 401) {
+        setUser(null);
+        setError("");
+      } else setError("学习服务暂时不可用，请稍后重试。恢复后会继续读取账户。");
     } finally {
+      refreshing.current = false;
       setReady(true);
     }
   }, []);
   useEffect(() => {
     refresh();
   }, [refresh]);
+  useEffect(() => {
+    if (!error) return;
+    // Retry only the read-only account probe, with a finite backoff budget.
+    // Keeping the error visible also prevents a temporary redirect to login.
+    const delays = [15_000, 30_000, 60_000];
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    function schedule(index: number) {
+      timer = setTimeout(async () => {
+        await refresh();
+        if (!cancelled && index + 1 < delays.length) schedule(index + 1);
+      }, delays[index]);
+    }
+    schedule(0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [error, refresh]);
   return (
     <AuthContext.Provider value={{ user, ready, refresh }}>
       <ViewportFrame />
-      {children}
+      {error ? (
+        <main className="shell">
+          <section className="panel glass" role="alert">
+            <h1>暂时无法连接学习服务</h1>
+            <p>{error}</p>
+            <p>页面会逐步延长间隔，最多自动重连3次。也可以点击下方按钮重试。</p>
+            <button className="primary" onClick={() => void refresh()}>
+              重新连接
+            </button>
+          </section>
+        </main>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 }
@@ -130,9 +172,14 @@ export function Navigation() {
         <span className="account-avatar" aria-hidden="true">
           {user?.display_name?.slice(0, 1) || "E"}
         </span>
-        <span className="account-name" title={user?.display_name}>
+        <Link
+          href="/settings#security"
+          className="account-name"
+          title="账户与密码设置"
+          aria-label="账户与密码设置"
+        >
           {user?.display_name}
-        </span>
+        </Link>
         <button
           className="quiet logout-button"
           onClick={logout}

@@ -34,12 +34,25 @@ export class APIError extends Error {
 export function setCSRF(value: string) {
   csrf = value;
 }
+async function fetchAPI(path: string, init?: RequestInit) {
+  try {
+    return await fetch(path, init);
+  } catch {
+    throw new APIError("学习服务暂时不可用，请稍后点击重试。", 503);
+  }
+}
 export async function authState(): Promise<{ user: User; csrf_token: string }> {
-  const response = await fetch("/api/v1/auth/me", { cache: "no-store" });
-  const data = await response.json();
+  const response = await fetchAPI("/api/v1/auth/me", { cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     csrf = "";
-    throw new APIError(data.error || "请先登录", response.status);
+    throw new APIError(
+      data.error ||
+        (response.status === 401
+          ? "请先登录"
+          : "学习服务暂时不可用，请稍后重试。"),
+      response.status,
+    );
   }
   csrf = data.csrf_token;
   return data;
@@ -55,19 +68,24 @@ async function headers(
   };
 }
 export async function api<T>(path: string, body?: object): Promise<T> {
-  const response = await fetch(
+  const response = await fetchAPI(
     `/api/v1${path}`,
     body
       ? {
           method: "POST",
-          headers: await headers(path !== "/auth/login"),
+          headers: await headers(
+            !["/auth/login", "/auth/register"].includes(path),
+          ),
           body: JSON.stringify(body),
         }
       : { cache: "no-store" },
   );
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && path !== "/auth/login") {
+    if (
+      response.status === 401 &&
+      !["/auth/login", "/auth/register"].includes(path)
+    ) {
       csrf = "";
       if (
         typeof window !== "undefined" &&
@@ -80,7 +98,7 @@ export async function api<T>(path: string, body?: object): Promise<T> {
   return data as T;
 }
 export async function speechBlob(path: string, body: object): Promise<Blob> {
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetchAPI(`/api/v1${path}`, {
     method: "POST",
     headers: await headers(true),
     body: JSON.stringify(body),
@@ -97,7 +115,7 @@ export function requestID(): string {
 
 export async function upload<T>(path: string, body: FormData): Promise<T> {
   if (!csrf) await authState();
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetchAPI(`/api/v1${path}`, {
     method: "POST",
     headers: { "X-ELS-Client": "web", "X-CSRF-Token": csrf },
     body,

@@ -96,7 +96,10 @@ export default function Settings() {
       <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">YOUR PACE · YOUR ACCOUNT</span>
         <h1>学得稳，也用得安心。</h1>
-        <p>复习设置会保存到你的账户。高目标记忆率通常需要更频繁的复习。</p>
+        <p>
+          账户：{auth.user?.username} · <a href="#security">修改我的密码</a> ·{" "}
+          <a href="#security">两步验证与设备登录</a>
+        </p>
       </section>
       {auth.user?.must_change_password && (
         <p className="notice" role="status">
@@ -205,7 +208,7 @@ export default function Settings() {
           </p>
         </section>
       )}
-      <section className="panel glass">
+      <section className="panel glass" id="security">
         <h2>密码与登录安全</h2>
         <form className="form-stack" onSubmit={changePassword}>
           <label>

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, requestID, type User } from "../../lib/api";
 import { Loading, Navigation, useProtected } from "../providers";
+import { RegistrationPolicy } from "../components/RegistrationPolicy";
 
 type Provider = {
   id: string;
@@ -548,6 +549,7 @@ export default function Admin() {
       )}
       {tab === "users" && (
         <section className="panel glass">
+          <RegistrationPolicy password={adminPassword} groups={config?.groups || []} />
           <div className="panel-heading">
             <h2>账户与授权</h2>
             <button className="quiet" onClick={() => setUser(emptyUser)}>
