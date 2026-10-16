@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, requestID, type User } from "../../lib/api";
 import { Loading, Navigation, useProtected } from "../providers";
+import { ModelScopeSelector } from "../components/ModelScopeSelector";
 
 type Provider = {
   id: string;
@@ -478,7 +479,7 @@ export default function Admin() {
             </button>
           </div>
           <p className="setting-note">
-            先添加服务商和模型，再建立身份组并勾选模型，最后到“账户”为用户分配身份组。学生可在练习页选择本组模型；作文可多选评审。
+            先添加服务商和模型，再通过类别、服务商或关键词划定范围，一键开启或撤销其中的模型。授权范围可以随时编辑并保存；学生只能选择本组获授权且已启用的模型。
           </p>
           <div className="segments">
             {config?.groups.map((g) => (
@@ -514,28 +515,15 @@ export default function Admin() {
                 maxLength={100}
               />
             </label>
-            <fieldset>
-              <legend>允许调用的模型</legend>
-              <div className="model-grants">
-                {config?.models.map((m) => (
-                  <label className="check-label" key={m.id}>
-                    <input
-                      type="checkbox"
-                      checked={group.model_ids.includes(m.id)}
-                      onChange={(e) =>
-                        setGroup({
-                          ...group,
-                          model_ids: e.target.checked
-                            ? [...group.model_ids, m.id]
-                            : group.model_ids.filter((id) => id !== m.id),
-                        })
-                      }
-                    />
-                    {m.name} · {m.kind === "tts" ? "语音" : "聊天"}
-                    {!m.enabled ? "（已停用）" : ""}
-                  </label>
-                ))}
-              </div>
+            <fieldset className="model-scope-fieldset">
+              <legend>允许调用的模型 · 支持批量授权</legend>
+              <ModelScopeSelector
+                label="身份组模型授权"
+                models={config?.models || []}
+                providers={config?.providers || []}
+                selected={group.model_ids}
+                onChange={(ids) => setGroup((current) => ({ ...current, model_ids: ids }))}
+              />
             </fieldset>
             <p className="setting-note">
               学生只能选择组内启用的模型；撤销授权会阻止待执行任务与后续追问。管理员在学生练习区也遵循身份组，资料入库任务单独按管理员配置执行。没有调用次数额度。
