@@ -62,9 +62,9 @@ API方式可独立完成全部入库，不需要Codex。选择CLI时使用独立
 4. 启动可选服务：`docker compose -f docker-compose.yml -f docker-compose.codex.yml up -d`。
 5. 管理页面把“目录识别”“题目与答案入库”切换Codex，可指定模型标识；学生侧的解释/追问/评审继续使用API。
 
-服务使用 `codex exec --ignore-user-config --ephemeral --sandbox read-only --skip-git-repo-check --image ... --output-last-message ... -`，不使用shell拼接，也不读取共享对话历史、生产目录或Docker socket。容器只挂载独立CLI授权卷，页图临时文件自动清除；拒绝远程图片URL、过大请求和非预期输入。CLI的只读沙盒仍需宿主环境支持；失败会停止，不自动放宽权限。实际CLI登录/付费模型调用未在本次测试中执行。
+服务使用 `codex exec --ignore-user-config --strict-config --ephemeral --skip-git-repo-check --image ... --output-last-message ... -`，并设置独立权限配置：文件系统默认deny，仅允许当前临时资料目录与必要运行时读取；CLI凭据目录与/proc明确deny，工具网络关闭。终端、统一执行器、应用、插件、钩子、浏览器、Computer Use、图像生成和网页搜索均关闭。不使用shell拼接，也不读取共享对话历史、生产目录或Docker socket。不要同时传旧版 `--sandbox`，它会覆盖命名权限配置。容器只挂载独立CLI授权卷，页图临时文件自动清除；拒绝远程图片URL、过大请求和非预期输入。此服务需要支持命名权限配置及上述开关的CLI版本；严格配置和文件沙盒仍需宿主环境支持；失败会停止，不自动放宽权限。实际CLI登录/付费模型调用未在本次测试中执行。
 
-[官方非交互执行文档](https://developers.openai.com/codex/noninteractive) · [官方CLI参数](https://developers.openai.com/codex/cli/reference/)
+[官方非交互执行文档](https://developers.openai.com/codex/noninteractive) · [官方CLI参数](https://developers.openai.com/codex/cli/reference/) · [官方权限配置](https://learn.chatgpt.com/docs/permissions)
 
 ## 备份与验证
 

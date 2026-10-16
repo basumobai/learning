@@ -8,7 +8,13 @@ class RunnerInputTest(unittest.TestCase):
     def test_only_supplied_pages_and_no_shell_command(self):
         with tempfile.TemporaryDirectory() as temp:
             args, prompt, output = prepare_input({'model':'codex-model','prompt':'只识别题目','content':[{'type':'text','text':'Question page 1'},{'type':'image_url','image_url':{'url':'data:image/png;base64,' + base64.b64encode(b'\x89PNG\r\n\x1a\n').decode()}}]}, Path(temp))
-            self.assertIn('read-only', args)
+            self.assertIn('default_permissions="learning-pdf"', args)
+            self.assertIn('permissions.learning-pdf.network.enabled=false', args)
+            self.assertTrue(any('":root"="deny"' in arg and '":workspace_roots"={"."="read"}' in arg for arg in args))
+            self.assertNotIn('--sandbox', args)
+            self.assertIn('--strict-config', args)
+            self.assertIn('shell_tool', args)
+            self.assertIn('apps', args)
             self.assertIn('--ignore-user-config', args)
             self.assertIn('--ephemeral', args)
             self.assertIn('Question page 1', prompt)
