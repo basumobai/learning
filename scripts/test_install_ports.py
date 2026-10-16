@@ -34,7 +34,9 @@ exit 0
         self.mock('docker', '''echo "$* | $WEB_PORT/$API_PORT" >> "$MOCK_LOG"
 if [[ "$1 $2" == 'volume ls' ]]; then printf '%s' "${MOCK_VOLUMES:-}"; fi
 if [[ "$*" == 'compose config --format json' ]]; then echo '{"volumes":{"postgres_data":{"name":"fixture_postgres_data"}}}'; fi
-if [[ "$*" == *'sh -c'* && "${MOCK_AUTH_FAIL:-}" == 1 ]]; then exit 1; fi
+# Match the official image: loopback/socket trust ignores a wrong password;
+# only the Compose network connection can detect this fixture's mismatch.
+if [[ "$*" == *'sh -c'* && "${MOCK_AUTH_FAIL:-}" == 1 && "$*" == *'psql -h postgres '* ]]; then exit 1; fi
 if [[ "$*" == "compose port web 3000" && "${MOCK_OWN:-}" == 1 ]]; then echo "127.0.0.1:$WEB_PORT"; fi
 if [[ "$*" == "compose port api 8080" && "${MOCK_OWN:-}" == 1 ]]; then echo "127.0.0.1:$API_PORT"; fi
 exit 0

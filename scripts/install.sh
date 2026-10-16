@@ -257,13 +257,14 @@ printf '部署模式：%s；数据库与密钥保留。\n' "$MODE"
 docker compose up -d postgres redis || die "数据库/缓存启动失败；请检查 Docker 磁盘空间和容器状态。"
 database_ready=0
 for (( attempt=1; attempt<=30; attempt++ )); do
-  if docker compose exec -T postgres pg_isready -U els -d els >/dev/null 2>&1; then database_ready=1; break; fi
+  if docker compose exec -T postgres pg_isready -h postgres -U els -d els >/dev/null 2>&1; then database_ready=1; break; fi
   sleep 2
 done
 (( database_ready )) || die "PostgreSQL 未就绪；请检查 docker compose ps 与数据库日志，不要删除卷。"
-# TCP authentication is required: pg_isready and local socket trust do not verify a password.
+# Use the Compose network address: the official image trusts both Unix sockets and
+# loopback TCP, so even psql -h 127.0.0.1 would accept a mismatched password.
 # Pass the secret through stdin, never as a process argument or diagnostic output.
-if ! printf '%s\n' "$db_password" | docker compose exec -T postgres sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -h 127.0.0.1 -U els -d els -w -tAc "SELECT 1"' >/dev/null 2>&1; then
+if ! printf '%s\n' "$db_password" | docker compose exec -T postgres sh -c 'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -h postgres -U els -d els -w -tAc "SELECT 1"' >/dev/null 2>&1; then
   die "数据库认证检查失败（密码不一致、数据库缺失或 TCP 认证配置异常）。未重建数据库或轮换密钥。先恢复原 .env；如需人工同步密码，运行 docker compose exec postgres psql -U els -d els，再使用交互式 \\password els，详见 docs/DEPLOY.md。"
 fi
 unset db_password
