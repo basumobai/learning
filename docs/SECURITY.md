@@ -39,3 +39,11 @@ APP_ENCRYPTION_KEY 为 base64 编码的 32 字节密钥，存放服务器环境�
 数据库记录所有历史答题；撤销软标记并原子恢复状态。管理、密码和 MFA 操作记录操作者、动作、对象、时间，不记录密码或密钥。会话过期清理不等于全量隐私删除；完整账户删除、长期数据留存策略和正式上线安全评审仍需后续设计。
 
 参考：[OWASP Authentication](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)、[Session Management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)、[Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)。
+
+## Learning 扩展
+
+个人API密钥和WebDAV凭据分别按账户/连接ID进行关联加密，不在配置响应、模型上下文或浏览器存储中返回。外部API/WebDAV继续使用公共HTTPS、公共DNS地址校验、禁重定向；WebDAV只读配置根目录内的相对路径。PDF上传限32MB/份、200页，文本与渲染命令使用参数数组、临时目录、输出和时间上限；API容器以非root运行。
+
+题目与解析不作为可执行代码，动态演示只接受原文精确范围、已知颜色和已授权插图ID。未交卷不返回答案或生成讲解，任务结果、对话、草稿与个人设置均查本人。限时训练截止后只能交已保存的草稿；词汇计时不会因新请求重置。
+
+可选Codex服务独立认证与挂载，不把数据库、云盘密码、生产目录或Docker socket交给CLI。CLI使用仅临时资料目录可读的命名文件权限、凭据目录与/proc读取拒绝、关闭工具网络及不必要的执行/连接工具；独立授权卷与临时页图，不加载用户MCP配置，不复用会话；执行失败不会自动放宽权限。仍需在实际环境验证CLI沙盒可用性。PDF模型/OCR结果需管理员对照来源核实后发布。

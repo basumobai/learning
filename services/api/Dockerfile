@@ -3,7 +3,7 @@ WORKDIR /src
 COPY services/api/ .
 RUN go mod download && go mod verify && CGO_ENABLED=0 go build -o /els ./cmd/api
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata && addgroup -S els && adduser -S -G els els
+RUN apk add --no-cache ca-certificates tzdata poppler-utils && addgroup -S els && adduser -S -G els els
 WORKDIR /app
 COPY --from=builder /els /app/els
 COPY migrations /app/migrations

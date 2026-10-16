@@ -67,5 +67,7 @@ assert dashboard['scheduler'] == 'FSRS-6'
 assert dashboard['today']['reviewed'] == 4
 assert api('/study/sessions/active')['session'] is None
 with urlopen('http://127.0.0.1:3000/', timeout=15) as response:
-    assert response.status == 200 and 'ELS' in response.read().decode()
+    assert response.status == 200 and 'Learning' in response.read().decode()
+assert api('/learning/catalog')['region'] == '广东'
+assert len(api('/learning/catalog')['subjects']) == 6
 print('Complete stack smoke test passed: scheduling, feedback, retry, undo, authenticated web, scheduling, feedback, retry, undo, three text question types, Next.js.')

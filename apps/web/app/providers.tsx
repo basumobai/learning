@@ -9,6 +9,7 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, authState, setCSRF, type User } from "../lib/api";
+import { Icon, type IconName } from "./icons";
 
 const AuthContext = createContext<{
   user: User | null;
@@ -63,12 +64,14 @@ export function Navigation() {
   const { user } = useAuth();
   const path = usePathname();
   const router = useRouter();
-  const items = [
-    ["/", "今日复习"],
-    ["/assistant", "AI 助学"],
-    ["/vocabulary", "词库"],
-    ["/settings", "账户与设置"],
-    ...(user?.role === "admin" ? [["/admin", "管理"]] : []),
+  const items: { href: string; label: string; icon: IconName }[] = [
+    { href: "/", label: "学习", icon: "book" },
+    { href: "/assistant", label: "AI 助学", icon: "sparkles" },
+    { href: "/vocabulary", label: "词库", icon: "library" },
+    { href: "/settings", label: "设置", icon: "settings" },
+    ...(user?.role === "admin"
+      ? [{ href: "/admin", label: "管理", icon: "shield" as const }]
+      : []),
   ];
   async function logout() {
     try {
@@ -80,28 +83,44 @@ export function Navigation() {
     }
   }
   return (
-    <header className="topbar glass app-topbar">
+    <header className="topbar app-topbar">
+      <a className="skip-link" href="#page-content">
+        跳到页面内容
+      </a>
       <Link className="brand" href="/">
-        <span className="mark">E</span>
+        <span className="mark">
+          <Icon name="book" />
+        </span>
         <span>
-          ELS<span className="brand-detail">英语助学</span>
+          Learning<span className="brand-detail">学习平台</span>
         </span>
       </Link>
       <nav aria-label="主要导航">
-        {items.map(([href, label]) => (
+        {items.map(({ href, label, icon }) => (
           <Link
             key={href}
             href={href}
             aria-current={path === href ? "page" : undefined}
           >
-            {label}
+            <Icon name={icon} />
+            <span>{label}</span>
           </Link>
         ))}
       </nav>
       <div className="account-menu">
-        <span>{user?.display_name}</span>
-        <button className="quiet" onClick={logout}>
-          退出
+        <span className="account-avatar" aria-hidden="true">
+          {user?.display_name?.slice(0, 1) || "E"}
+        </span>
+        <span className="account-name" title={user?.display_name}>
+          {user?.display_name}
+        </span>
+        <button
+          className="quiet logout-button"
+          onClick={logout}
+          aria-label="退出登录"
+          title="退出登录"
+        >
+          <Icon name="logout" />
         </button>
       </div>
     </header>
@@ -109,9 +128,27 @@ export function Navigation() {
 }
 export function Loading() {
   return (
-    <main className="shell">
-      <div className="panel glass">
-        <p role="status">正在读取账户与学习记录…</p>
+    <main className="shell loading-shell" aria-busy="true">
+      <div className="loading-heading" aria-hidden="true">
+        <span className="mark">
+          <Icon name="book" />
+        </span>
+        <span className="skeleton skeleton-title" />
+      </div>
+      <p className="loading-status" role="status">
+        正在读取账户与学习记录…
+      </p>
+      <div className="stats" aria-hidden="true">
+        {[0, 1, 2].map((n) => (
+          <div key={n} className="stat glass skeleton-card">
+            <span className="skeleton skeleton-label" />
+            <span className="skeleton skeleton-value" />
+          </div>
+        ))}
+      </div>
+      <div className="panel glass skeleton-content" aria-hidden="true">
+        <span className="skeleton skeleton-title" />
+        <span className="skeleton skeleton-label" />
       </div>
     </main>
   );

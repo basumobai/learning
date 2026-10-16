@@ -1,6 +1,8 @@
-# ELS · 广东高中英语 AI 助学平台
+# Learning · 广东高中 AI 学习平台
 
-当前专注 **Web**：FSRS-6 词汇复习、听音拼写、AI 辅导对话、句子拆解和听力训练。教材词库由管理员自行导入，字段顺序为 **单词、音标、词性、中文**。内置五个原创示例词仅用于开发，不代表教材已导入。
+当前专注 **Web**：语文、数学、英语、物理、化学、生物专项练习，PDF题目/答案配对入库、插图裁剪、按需动态讲解、步骤内AI追问、作文多模型评审，以及保留的FSRS-6英语词汇/听音/听力训练。教材词库由管理员自行导入，字段顺序为 **单词、音标、词性、中文**。内置五个原创示例词仅用于开发，不代表教材已导入。
+
+多学科管理入口 `/admin/learning`，原词汇复习 `/english`，极速四选一 `/challenge`。[完整流程、训练规则、数据库说明与可选Codex入库](docs/LEARNING.md)。实际题库由管理员导入并审核发布。
 
 ## 本地启动
 
@@ -26,9 +28,10 @@ docker compose up --build -d
 1. **管理 → 服务商与模型**：填 `https://openrouter.ai/api/v1` 和自己的 API Key。也可使用其他公开 HTTPS OpenAI 兼容接口，例如 `https://api.openai.com/v1`。
 2. 添加聊天模型，填写供应商的完整 model ID。支持 JSON mode 的模型可勾选该参数；未勾选时依靠 JSON 提示与服务端结构校验。
 3. 添加语音模型。OpenRouter 可使用 `openai/gpt-4o-mini-tts-2025-12-15`，音色例如 `cedar, marin, coral`；其他模型需按供应商文档填写音色。朗读风格可配置，不支持 instructions 参数时留空。
-4. **权限组**：勾选允许的聊天和语音模型，再给每个用户分配组。管理员自己调用模型也遵循所属组。**没有应用调用次数额度或对话数量额度**。
+4. **权限组**：勾选允许的聊天和语音模型，再给每个用户分配组。原英语入口继续按所属组授权；多学科管理员入库可使用启用的任务模型，学生调用平台模型始终遵循所属组。**没有应用调用次数额度或对话数量额度**。
 5. **账户**：创建用户并提供初始密码；首次登录强制改密。可停用账户、重置密码及遗失的两步验证。管理写入需要管理员当前密码再次验证。
-6. **教材词库**：上传 UTF-8 CSV/TSV/TXT 或粘贴四字段词表，先预览再确认；重复词义跳过，不同词性/释义及其音标分别保留。保留教材词形大小写（如 English、I），大小写重复不会生成两个单词。
+6. **多学科与 AI 任务**：进入 `/admin/learning` 配置各用途的默认提示词与模型，再上传题目和答案PDF、选小节、核对草稿后发布。学生可在设置接入个人API；云盘支持WebDAV。
+7. **教材词库**：上传 UTF-8 CSV/TSV/TXT 或粘贴四字段词表，先预览再确认；重复词义跳过，不同词性/释义及其音标分别保留。保留教材词形大小写（如 English、I），大小写重复不会生成两个单词。
 
 词表示例：
 
@@ -67,4 +70,4 @@ npm run build
 
 数据库集成测试需要 `TEST_DATABASE_URL` 指向可创建临时 schema 的 PostgreSQL；未设置时明确跳过。CI 使用 PostgreSQL 17 运行真实迁移、并发、账户隔离、权限、AI 重试、听力交卷、每日预算和撤销测试，并启动 Compose 栈执行带登录的冒烟测试。增量迁移保留已有学习数据。
 
-[AnkiDroid 对比与剩余差距](docs/ANKIDROID_COMPARISON.md) · [产品行为](docs/PRODUCT.md) · [接口](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [AI](docs/AI.md)
+[本轮验证与新界面预览](docs/LEARNING_VALIDATION.md) · [前端设计与预览](docs/FRONTEND.md) · [AnkiDroid 对比与剩余差距](docs/ANKIDROID_COMPARISON.md) · [产品行为](docs/PRODUCT.md) · [接口](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [AI](docs/AI.md)

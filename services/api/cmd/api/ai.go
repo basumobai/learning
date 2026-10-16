@@ -125,7 +125,7 @@ func (s *server) beginAI(ctx context.Context, requestID, kind, conversation stri
 		}
 	}
 	var old, status string
-	var response json.RawMessage
+	var response []byte
 	var updated time.Time
 	err = tx.QueryRowContext(ctx, `SELECT fingerprint,status,response,updated_at FROM ai_requests WHERE user_id=$1 AND request_id=$2 FOR UPDATE`, userID(ctx), requestID).Scan(&old, &status, &response, &updated)
 	if err == nil {
@@ -220,7 +220,7 @@ func (s *server) chat(w http.ResponseWriter, r *http.Request) {
 			s.failAI(context.WithoutCancel(r.Context()), input.RequestID)
 		}
 	}()
-	messages := []chatMessage{{"system", tutorPrompt}}
+	messages := []chatMessage{{"system", s.taskPrompt(r.Context(), "tutor")}}
 	rows, err := s.db.QueryContext(r.Context(), `SELECT role,content FROM ai_messages WHERE conversation_id=$1 ORDER BY id`, id)
 	if err != nil {
 		s.dbError(w, "chat history", err)

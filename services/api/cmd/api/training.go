@@ -106,9 +106,9 @@ func (s *server) generateTraining(w http.ResponseWriter, r *http.Request) {
 			s.failAI(r.Context(), input.RequestID)
 		}
 	}()
-	prompt, content := sentencePrompt, input.Text
+	prompt, content := s.taskPrompt(r.Context(), "sentence"), input.Text
 	if input.Kind == "listening" {
-		prompt = listeningPrompt
+		prompt = s.taskPrompt(r.Context(), "listening")
 		content = "难度：" + input.Level + "。主题：" + input.Text
 	}
 	text, err := s.completion(r.Context(), m, []chatMessage{{"system", tutorPrompt + "\n" + prompt}, {"user", content}}, true)
