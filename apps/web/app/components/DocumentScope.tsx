@@ -116,6 +116,7 @@ export function DocumentScope({
           <label>
             确认学科
             <select
+              aria-label="确认学科"
               required
               value={subject}
               onChange={(e) => {
@@ -151,6 +152,7 @@ export function DocumentScope({
             确认教材册次
             {subject === "english" ? (
               <select
+                aria-label="确认教材册次"
                 required
                 value={volume}
                 onChange={(e) => {
@@ -166,6 +168,7 @@ export function DocumentScope({
             ) : (
               <>
                 <input
+                  aria-label="确认教材册次"
                   required
                   list={`volumes-${id}`}
                   maxLength={80}

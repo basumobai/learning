@@ -570,6 +570,7 @@ export default function Practice() {
                     <label>
                       教材版本
                       <select
+                        aria-label="教材版本"
                         value={edition}
                         onChange={(e) => {
                           setEdition(e.target.value);
@@ -604,6 +605,7 @@ export default function Practice() {
                     <label>
                       教材册次
                       <select
+                        aria-label="教材册次"
                         value={volume}
                         onChange={(e) => {
                           setVolume(e.target.value);
