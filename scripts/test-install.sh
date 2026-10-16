@@ -49,7 +49,11 @@ cat > "$WORK/fakebin/curl" <<'MOCK'
 #!/usr/bin/env bash
 exit 0
 MOCK
-chmod +x "$WORK/fakebin/docker" "$WORK/fakebin/curl"
+cat > "$WORK/fakebin/ss" <<'MOCK'
+#!/usr/bin/env bash
+exit 0
+MOCK
+chmod +x "$WORK/fakebin/docker" "$WORK/fakebin/curl" "$WORK/fakebin/ss"
 export MOCK_DOCKER_LOG="$WORK/docker.log"
 PATH="$WORK/fakebin:$PATH" bash "$WORK/scripts/install.sh" >"$WORK/install.log"
 grep -q '^compose config --quiet$' "$MOCK_DOCKER_LOG"
@@ -57,3 +61,5 @@ grep -q '^compose up --build -d$' "$MOCK_DOCKER_LOG"
 grep -q '安装完成' "$WORK/install.log"
 cmp "$WORK/.env" "$WORK/snapshot"
 echo 'Installer checks passed: generated secrets, permissions, idempotence, invalid key rejection, Compose flow.'
+
+python3 "$ROOT/scripts/test_install_ports.py" -v

@@ -5,6 +5,11 @@ on:
 permissions:
   contents: read
 jobs:
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/test-install.sh
   api:
     runs-on: ubuntu-latest
     services:
