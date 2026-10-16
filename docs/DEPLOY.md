@@ -131,3 +131,13 @@ docker compose logs api postgres --tail=100
 | 录音不可用 | 使用HTTPS并允许麦克风，也可填写英文作答 |
 
 安装器隔离测试：`bash scripts/test-install.sh`。完整CI包括PostgreSQL17、Go race、Web构建/浏览器和Compose集成。验证记录见 [DEPLOYMENT_VALIDATION](DEPLOYMENT_VALIDATION.md)。
+
+## 管理员忘记密码
+
+有另一名管理员时，在账户管理中重新认证后重置。只有服务器操作者可以在交互终端运行：
+
+```bash
+docker compose exec -it api /app/els admin-reset-password --username admin
+```
+
+密码不回显，需再次输入并确认 `RESET admin`；命令撤销所有会话、要求首次改密并记录审计。丢失验证器时明确加 `--clear-mfa`。不会启用已停用账号，不修改 `.env`、数据库密码、文件或 APP_ENCRYPTION_KEY。更改环境里的初始密码不能恢复已有账号。

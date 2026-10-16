@@ -267,7 +267,7 @@ func (s *server) saveLearningTask(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "任务后端配置无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	if in.Routing != nil {

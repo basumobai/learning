@@ -1,0 +1,1 @@
+export function AdminNavigation(){return <nav className="admin-settings-nav" aria-label="管理员设置"><a href="/admin/learning">资源管理</a><a href="/admin#providers">AI服务商与模型</a><a href="/admin#groups">身份组</a><a href="/admin/learning#tasks">AI任务路由</a><a href="/admin#users">用户与安全</a><a href="/admin#audit">操作记录</a></nav>;}

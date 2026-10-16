@@ -220,7 +220,7 @@ unset admin_password encryption_key key_bytes
 
 if (( new_install )); then
   printf '\n管理员：admin\n初始密码（仅本次显示，请立即安全保存）：%s\n' "$new_admin_password"
-  printf '密码也保存在权限为 600 的 .env 中；首次登录后建议修改密码。\n\n'
+  printf '密码也保存在权限为 600 的 .env 中；首次登录必须修改密码。\n\n'
 fi
 unset new_admin_password
 

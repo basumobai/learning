@@ -52,7 +52,7 @@ export function DocumentScope({
         edition: confirmedEdition,
         volume,
         term,
-        admin_password: password,
+
       });
       await onConfirmed();
     } catch (e) {

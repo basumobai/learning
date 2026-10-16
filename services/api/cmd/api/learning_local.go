@@ -83,7 +83,7 @@ func (s *server) importLocalPDF(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "导入信息无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	q, err := readLocalPDF(localPDFRoot(), in.Question)

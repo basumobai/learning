@@ -179,6 +179,10 @@ func TestAccountsAIAndLearningIsolation(t *testing.T) {
 		t.Fatal("cross-origin login accepted")
 	}
 	a.login("admin", password, "")
+	a.call("GET", "/api/v1/dashboard", nil, 403)
+	a.call("POST", "/api/v1/auth/password", map[string]string{"current_password": password, "new_password": "administrator-permanent-password"}, 200)
+	password = "administrator-permanent-password"
+	a.login("admin", password, "")
 	missingCSRF := a.request("POST", "/api/v1/auth/revoke-sessions", map[string]any{})
 	missingCSRF.Header.Del("X-CSRF-Token")
 	record = httptest.NewRecorder()

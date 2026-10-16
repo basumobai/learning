@@ -61,13 +61,13 @@ export function RegistrationPolicy({
           <button
             type="button"
             className="quiet"
-            disabled={busy || !password}
+            disabled={busy}
             onClick={async () => {
               setBusy(true);
               try {
                 await api("/admin/registration", {
                   ...policy,
-                  admin_password: password,
+
                 });
                 setMessage("注册设置已保存，仅影响此后注册的用户。");
               } catch (e) {

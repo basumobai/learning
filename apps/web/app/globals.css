@@ -3873,3 +3873,5 @@ body:has(.figure-dialog[open]) {
 .model-catalog-dialog::backdrop{background:rgb(20 30 50/.45);backdrop-filter:blur(5px)}
 .catalog-actions{display:flex;gap:12px;flex-wrap:wrap;position:sticky;bottom:0;padding:16px 0;background:inherit}.catalog-metadata{display:grid;gap:12px;max-height:320px;overflow:auto}.catalog-metadata article{display:grid;gap:4px;border-bottom:1px solid #8884;padding:12px 0;overflow-wrap:anywhere}.route-order{padding-left:24px}.route-order li{display:flex;gap:12px;justify-content:space-between;align-items:center;margin:8px 0}.catalog-metadata code{white-space:normal}
 @media(max-width:600px){.model-catalog-dialog{padding:16px;border-radius:18px}.catalog-actions>*{flex:1}}
+
+.admin-settings-nav{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.admin-settings-nav a{padding:10px 14px;border-radius:14px;background:#8881;min-height:44px;display:flex;align-items:center;font-size:14px}

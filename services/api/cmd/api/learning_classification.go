@@ -134,7 +134,7 @@ func (s *server) confirmDocumentScope(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)

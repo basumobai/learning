@@ -41,7 +41,7 @@ func (s *server) saveLearningCloud(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	if in.ID == "" {
@@ -182,7 +182,7 @@ func (s *server) importCloudPDF(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "云盘文件参数无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	data := [][]byte{}

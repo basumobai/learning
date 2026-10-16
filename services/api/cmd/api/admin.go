@@ -33,7 +33,7 @@ func (s *server) adminConfig(w http.ResponseWriter, r *http.Request) {
 		"users":     `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT id,username,display_name,role,group_id,disabled,must_change_password,totp_secret IS NOT NULL AS mfa_enabled FROM users WHERE username IS NOT NULL ORDER BY username) t`,
 		"providers": `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT id,name,base_url,enabled,true AS has_key FROM ai_providers ORDER BY name) t`,
 		"models":    `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT id,provider_id,model_id,name,kind,voices,instructions,json_mode,enabled FROM ai_models ORDER BY kind,name) t`,
-		"groups":    `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT g.id,g.name,COALESCE((SELECT jsonb_agg(model_id ORDER BY model_id) FROM group_models WHERE group_id=g.id),'[]') AS model_ids FROM permission_groups g ORDER BY g.id) t`,
+		"groups":    `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT g.id,g.name,g.revision,COALESCE((SELECT jsonb_agg(model_id ORDER BY model_id) FROM group_models WHERE group_id=g.id),'[]') AS model_ids FROM permission_groups g ORDER BY g.id) t`,
 		"audit":     `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT a.id,u.username AS actor,a.action,a.target,a.created_at FROM account_audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 50) t`,
 	}
 	for name, query := range queries {
@@ -64,7 +64,7 @@ func (s *server) saveProvider(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	if !s.adminPassword(w, r, input.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	if input.ID == "" {
@@ -141,7 +141,7 @@ func (s *server) saveModel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !s.adminPassword(w, r, input.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	raw, _ := json.Marshal(input.Voices)
@@ -179,12 +179,13 @@ func (s *server) saveGroup(w http.ResponseWriter, r *http.Request) {
 		Name     string  `json:"name"`
 		Models   []int64 `json:"model_ids"`
 		Password string  `json:"admin_password"`
+		Revision *int    `json:"revision"`
 	}
 	if decodeLimit(r, &input, 65536) != nil || strings.TrimSpace(input.Name) == "" || len(input.Name) > 100 {
 		fail(w, 400, "权限组无效")
 		return
 	}
-	if !s.adminPassword(w, r, input.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
@@ -197,7 +198,11 @@ func (s *server) saveGroup(w http.ResponseWriter, r *http.Request) {
 	if id == 0 {
 		err = tx.QueryRowContext(r.Context(), `INSERT INTO permission_groups(name) VALUES($1) RETURNING id`, input.Name).Scan(&id)
 	} else {
-		err = tx.QueryRowContext(r.Context(), `UPDATE permission_groups SET name=$2 WHERE id=$1 RETURNING id`, id, input.Name).Scan(&id)
+		err = tx.QueryRowContext(r.Context(), `UPDATE permission_groups SET name=$2,revision=revision+1 WHERE id=$1 AND ($3::integer IS NULL OR revision=$3) RETURNING id`, id, input.Name, input.Revision).Scan(&id)
+	}
+	if errors.Is(err, sql.ErrNoRows) && input.Revision != nil {
+		fail(w, 409, "身份组已被修改，请刷新后重试")
+		return
 	}
 	if err != nil {
 		fail(w, 400, "权限组不存在或名称重复")

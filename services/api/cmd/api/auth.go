@@ -89,7 +89,7 @@ func (s *server) bootstrap(ctx context.Context) error {
 		return tx.Commit()
 	}
 	id := security.Token(18)
-	_, err = tx.ExecContext(ctx, `INSERT INTO users(id,username,display_name,password_hash,role) VALUES($1,$2,'管理员',$3,'admin')`, id, username, security.HashPassword(password))
+	_, err = tx.ExecContext(ctx, `INSERT INTO users(id,username,display_name,password_hash,role,must_change_password) VALUES($1,$2,'管理员',$3,'admin',true)`, id, username, security.HashPassword(password))
 	if err != nil {
 		return err
 	}

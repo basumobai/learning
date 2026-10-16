@@ -25,7 +25,12 @@ def rid():
     return str(uuid.uuid4())
 
 api('/auth/login', {'username': os.environ.get('ELS_ADMIN_USERNAME', 'admin'), 'password': os.environ['ELS_ADMIN_PASSWORD'], 'code': ''})
-csrf = api('/auth/me')['csrf_token']
+state = api('/auth/me')
+csrf = state['csrf_token']
+if state['user']['must_change_password']:
+    api('/auth/password', {'current_password': os.environ['ELS_ADMIN_PASSWORD'], 'new_password': os.environ['ELS_ADMIN_PASSWORD'] + '-changed'})
+    api('/auth/login', {'username': os.environ.get('ELS_ADMIN_USERNAME', 'admin'), 'password': os.environ['ELS_ADMIN_PASSWORD'] + '-changed', 'code': ''})
+    csrf = api('/auth/me')['csrf_token']
 spellings = {'适应': 'adapt', '采用': 'adopt', '维持': 'maintain', '后果': 'consequence', '必要的': 'necessary'}
 meanings = {value: key for key, value in spellings.items()}
 created = api('/study/sessions', {'types': ['spelling'], 'limit': 2, 'new_limit': 2}, 201)

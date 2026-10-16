@@ -1,4 +1,5 @@
 "use client";
+import { AdminNavigation } from "../../components/AdminNavigation";
 import { ModelScopeSelector } from "../../components/ModelScopeSelector";
 import { ServerPDFInbox, DocumentOCR } from "../../components/ServerPDFInbox";
 import { DocumentScope } from "../../components/DocumentScope";
@@ -76,7 +77,7 @@ type Cloud = {
 export default function AdminLearning() {
   const auth = useProtected(true),
     [tab, setTab] = useState("documents"),
-    [password, setPassword] = useState(""),
+    [password] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
@@ -134,7 +135,7 @@ export default function AdminLearning() {
     setClouds(cc.connections);
   }
   useEffect(() => {
-    if (auth.allowed) load().catch((e) => setError(e.message));
+    if (auth.allowed) {const hash=window.location.hash.slice(1);if(["documents","questions","tasks","words","cloud"].includes(hash))setTab(hash);load().catch((e) => setError(e.message));}
   }, [auth.allowed]);
   useEffect(() => {
     if (
@@ -149,6 +150,7 @@ export default function AdminLearning() {
     );
     return () => clearInterval(timer);
   }, [documents]);
+  useEffect(()=>{const sync=()=>{const h=window.location.hash.slice(1);if(["documents","questions","tasks","words","cloud"].includes(h))setTab(h);};window.addEventListener("hashchange",sync);return()=>window.removeEventListener("hashchange",sync);},[]);
   async function run(work: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -180,6 +182,7 @@ export default function AdminLearning() {
   return (
     <main className="shell">
       <Navigation />
+      <AdminNavigation/>
       <div id="page-content" tabIndex={-1} className="learning-admin">
         <header className="page-intro">
           <span className="eyebrow">LEARNING · 管理工作台</span>
@@ -192,15 +195,7 @@ export default function AdminLearning() {
         <p>
           <Link href="/admin#groups">账户、服务商、模型权限组与词库导入 →</Link>
         </p>
-        <label className="admin-reauth">
-          当前管理员密码
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
+
         <div
           className="subject-tabs learning-admin-tabs"
           role="group"
@@ -269,7 +264,7 @@ export default function AdminLearning() {
                   void run(async () => {
                     await api("/admin/learning/tasks", {
                       ...task,
-                      admin_password: password,
+
                     });
                     await load();
                     setTask(null);
@@ -363,7 +358,7 @@ export default function AdminLearning() {
                     </select>
                   </label>
                 )}
-                <button className="primary" disabled={busy || !password}>
+                <button className="primary" disabled={busy}>
                   保存配置
                 </button>
               </form>
@@ -383,7 +378,7 @@ export default function AdminLearning() {
                   e.preventDefault();
                   const data = new FormData(e.currentTarget);
                   void run(async () => {
-                    data.set("admin_password", password);
+
                     if (source === "upload")
                       await upload("/admin/learning/documents", data);
                     else {
@@ -396,7 +391,7 @@ export default function AdminLearning() {
                         connection_id: v.connection_id,
                         question_path: v.question_path,
                         answer_path: v.answer_path,
-                        admin_password: password,
+
                       });
                     }
                     await load();
@@ -498,7 +493,7 @@ export default function AdminLearning() {
                     </label>
                   </>
                 )}
-                <button className="primary" disabled={busy || !password}>
+                <button className="primary" disabled={busy}>
                   接收文件并识别资料
                 </button>
               </form>
@@ -699,7 +694,7 @@ export default function AdminLearning() {
                             chapters: outline.filter((c) =>
                               picked.includes(c.key),
                             ),
-                            admin_password: password,
+
                           },
                         );
                         await load();
@@ -777,7 +772,7 @@ export default function AdminLearning() {
                   {["draft", "published"].map((status) => (
                     <button
                       className={status === "published" ? "primary" : "quiet"}
-                      disabled={busy || !password}
+                      disabled={busy}
                       key={status}
                       onClick={() =>
                         void run(async () => {
@@ -787,7 +782,7 @@ export default function AdminLearning() {
                             solution: data.solution,
                             revision: draft.revision,
                             status,
-                            admin_password: password,
+
                           });
                           await load();
                           setDraft(null);
@@ -890,12 +885,12 @@ export default function AdminLearning() {
                   <p>{s.rationale}</p>
                   <button
                     className="quiet"
-                    disabled={busy || !password}
+                    disabled={busy}
                     onClick={() =>
                       void run(async () => {
                         await api(`/admin/learning/word-sets/${s.id}/approve`, {
                           approved: !s.approved,
-                          admin_password: password,
+
                         });
                         await load();
                       })
@@ -949,7 +944,7 @@ export default function AdminLearning() {
                 void run(async () => {
                   await api("/admin/learning/cloud", {
                     ...cloud,
-                    admin_password: password,
+
                   });
                   setCloud((v) => ({ ...v, secret: "" }));
                   await load();
@@ -1000,7 +995,7 @@ export default function AdminLearning() {
                 />
                 启用连接
               </label>
-              <button className="primary" disabled={busy || !password}>
+              <button className="primary" disabled={busy}>
                 保存云盘
               </button>
               {cloud.id && (

@@ -42,7 +42,7 @@ func (s *server) uploadLearningDocument(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
-	if !s.adminPassword(w, r, r.FormValue("admin_password")) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	q, err := readPDF(r, "question_pdf")
@@ -125,7 +125,7 @@ func (s *server) extractLearningDocument(w http.ResponseWriter, r *http.Request)
 		fail(w, 400, "请选择章节及题目/答案页码")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	if err := s.validateChapterPages(r.Context(), r.PathValue("id"), in.Chapters); err != nil {
@@ -657,7 +657,7 @@ func (s *server) saveLearningQuestion(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "题目格式无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	var subject, kind string

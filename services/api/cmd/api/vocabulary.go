@@ -38,7 +38,7 @@ func (s *server) importVocabulary(w http.ResponseWriter, r *http.Request) {
 		respond(w, 400, preview)
 		return
 	}
-	if !s.adminPassword(w, r, input.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	tx, err := s.studyTx(r.Context())

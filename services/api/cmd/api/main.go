@@ -45,6 +45,12 @@ func main() {
 	if err != nil {
 		log.Fatal("database unavailable or authentication failed; restore the original .env and see docs/DEPLOY.md; database has not been reset")
 	}
+	if len(os.Args) > 1 && os.Args[1] == "admin-reset-password" {
+		if err := adminRecoveryCommand(context.Background(), db, os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := migrate(ctx, db); err != nil {
 		log.Fatal(err)
 	}

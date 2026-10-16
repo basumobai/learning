@@ -18,7 +18,7 @@ func (s *server) queueLearningOCR(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请求格式无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	var exists bool

@@ -122,7 +122,7 @@ func (s *server) saveRegistrationPolicy(w http.ResponseWriter, r *http.Request) 
 		fail(w, 400, "注册设置无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)

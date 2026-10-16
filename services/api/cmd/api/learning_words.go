@@ -95,7 +95,7 @@ func (s *server) approveWordSet(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请求无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
