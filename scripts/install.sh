@@ -45,12 +45,13 @@ esac
 
 need openssl
 port_valid() {
-  [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 >= 1024 && 10#$1 <= 65535 ))
+  [[ "$1" =~ ^[1-9][0-9]{3,4}$ ]] && (( $1 >= 1024 && $1 <= 65535 ))
 }
 port_available() {
-  local port="$1"
+  local port="$1" listeners
   if command -v ss >/dev/null 2>&1; then
-    ! ss -H -ltn "( sport = :$port )" | grep -q .
+    listeners="$(ss -H -ltn "( sport = :$port )" 2>&1)" || die "无法检查监听端口；请检查 ss。"
+    [[ -z "$listeners" ]]
   else
     need python3
     PORT_TO_TEST="$port" python3 - <<'PY'
@@ -64,18 +65,23 @@ PY
   fi
 }
 choose_port() {
-  local label="$1" current="$2" selection
+  local label="$1" current="$2" excluded="${3:-}" selection
   while true; do
     if [[ -t 0 ]]; then
-      read -r -p "$label [$current]: " selection
+      read -r -p "$label [$current]: " selection || die "端口选择已取消；尚未生成配置。"
       selection="${selection:-$current}"
     else
       selection="$current"
     fi
-    port_valid "$selection" || { [[ -t 0 ]] || die "$label 端口无效"; echo "端口需在 1024–65535 之间。"; continue; }
-    if ! port_available "$selection"; then
+    port_valid "$selection" || { [[ -t 0 ]] || die "$label 端口无效"; echo "端口需在 1024–65535 之间，不能含前导零。" >&2; continue; }
+    if [[ "$selection" == "$excluded" ]]; then
+      [[ -t 0 ]] || die "Web 与 API 端口不可相同"
+      echo "Web 与 API 端口不可相同，请换一个。" >&2
+      continue
+    fi
+    if (( ! CONFIG_ONLY )) && ! port_available "$selection"; then
       [[ -t 0 ]] || die "$label 端口 $selection 已被占用"
-      echo "端口 $selection 已占用，请换一个。"
+      echo "端口 $selection 已占用，请换一个。" >&2
       continue
     fi
     printf '%s' "$selection"
@@ -88,6 +94,9 @@ new_admin_password=""
 
 if [[ ! -e "$ENV_FILE" ]]; then
   [[ -f "$ROOT/.env.example" ]] || die "找不到 .env.example；请在完整仓库内运行。"
+  # Choose before creating .env so a cancelled/conflicting install can be retried.
+  web_port="$(choose_port 'Web 访问端口' "${WEB_PORT:-3000}")"
+  api_port="$(choose_port 'API 端口' "${API_PORT:-8080}" "$web_port")"
   database_password="$(openssl rand -hex 24)"
   new_admin_password="$(openssl rand -hex 20)"
   encryption_key="$(openssl rand -base64 32 | tr -d '\n')"
@@ -97,9 +106,9 @@ if [[ ! -e "$ENV_FILE" ]]; then
 # Generated locally. Do not commit this file or share it.
 # The encryption key must remain unchanged while encrypted data exists.
 POSTGRES_PASSWORD=$database_password
-APP_ORIGIN=http://localhost:3000
-WEB_PORT=3000
-API_PORT=8080
+APP_ORIGIN=http://localhost:$web_port
+WEB_PORT=$web_port
+API_PORT=$api_port
 ELS_ADMIN_USERNAME=admin
 ELS_ADMIN_PASSWORD=$new_admin_password
 APP_ENCRYPTION_KEY=$encryption_key
@@ -118,22 +127,17 @@ else
   printf '检测到现有 .env：保留全部配置与密钥。\n'
 fi
 
-if (( new_install )); then
-  web_port="$(choose_port 'Web 访问端口' "${WEB_PORT:-3000}")"
-  api_port="$(choose_port 'API 端口' "${API_PORT:-8080}")"
-  [[ "$web_port" != "$api_port" ]] || die "Web 与 API 端口不能相同"
-  sed -i "s/^WEB_PORT=.*/WEB_PORT=$web_port/; s/^API_PORT=.*/API_PORT=$api_port/; s|^APP_ORIGIN=http://localhost:3000|APP_ORIGIN=http://localhost:$web_port|" "$ENV_FILE"
-else
+if (( ! new_install )); then
+  # Match Compose defaults for deployments created before configurable ports.
   web_port="$(normalize_quoted "$(read_env WEB_PORT)")"
   api_port="$(normalize_quoted "$(read_env API_PORT)")"
-  [[ -n "$web_port" && -n "$api_port" ]] || die "已有 .env 缺少 WEB_PORT/API_PORT，请添加自定义端口后重试"
-  port_valid "$web_port" && port_valid "$api_port" || die "端口不合法"
+  web_port="${web_port:-3000}"
+  api_port="${api_port:-8080}"
+  port_valid "$web_port" && port_valid "$api_port" || die "端口需在 1024–65535 之间，不能含前导零"
 fi
 [[ "$web_port" != "$api_port" ]] || die "Web 与 API 端口不可相同"
-if (( ! CONFIG_ONLY )); then
-  port_available "$web_port" || die "Web 端口 $web_port 已被占用"
-  port_available "$api_port" || die "API 端口 $api_port 已被占用"
-fi
+# Compose and health probes must use the same values even with exported shell vars.
+export WEB_PORT="$web_port" API_PORT="$api_port"
 
 for key in POSTGRES_PASSWORD APP_ORIGIN ELS_ADMIN_USERNAME ELS_ADMIN_PASSWORD APP_ENCRYPTION_KEY; do
   value="$(normalize_quoted "$(read_env "$key")")"
@@ -176,6 +180,15 @@ docker info >/dev/null 2>&1 || die "Docker 守护进程不可用，或当前用�
 docker compose version >/dev/null 2>&1 || die "需要 Docker Compose v2 插件（使用 docker compose，而非 docker-compose）。"
 cd "$ROOT"
 docker compose config --quiet || die "Compose 配置校验失败；请检查 .env。"
+check_service_port() {
+  local service="$1" container_port="$2" host_port="$3" published
+  # A running service belonging to THIS Compose project may reuse its mapping.
+  published="$(docker compose port "$service" "$container_port" 2>/dev/null || true)"
+  [[ "$published" == "127.0.0.1:$host_port" ]] && return 0
+  port_available "$host_port" || die "$service 端口 $host_port 已被其他服务占用；请修改 .env 中的端口，不要停止其他业务。"
+}
+check_service_port web 3000 "$web_port"
+check_service_port api 8080 "$api_port"
 printf '正在启动 Learning 服务…\n'
 docker compose up --build -d || die "启动失败。使用 docker compose ps 和 docker compose logs --tail=100 查看原因。"
 
@@ -194,6 +207,6 @@ if (( ! healthy )); then
   exit 1
 fi
 
-printf '\n安装完成！本机访问：http://localhost:${web_port}\n'
+printf '\n安装完成！本机访问：http://localhost:%s\n' "$web_port"
 printf '远程 VPS 请通过 SSH 隧道访问；对外开放前务必配置 HTTPS 反向代理与正确的 APP_ORIGIN。\n'
 printf '常用命令：docker compose ps | docker compose logs -f --tail=100 | docker compose down\n'

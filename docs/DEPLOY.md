@@ -7,10 +7,12 @@ Learning 默认采用 **Docker Compose + PostgreSQL + Redis + Go API + Next.js W
 适用：Linux VPS / 开发机，已安装 Docker Engine、Docker Compose v2、Git、OpenSSL 与 curl，且当前用户可以执行 `docker info`。
 
 ```bash
-git clone https://github.com/basumobai/english.git
-cd english
+git clone https://github.com/basumobai/learning.git
+cd learning
 bash scripts/install.sh
 ```
+
+首次安装交互选择 Web/API 主机端口（默认 3000/8080，范围 1024–65535），遇到冲突可重新输入。非交互安装可使用 `WEB_PORT=3001 API_PORT=8081 bash scripts/install.sh`。只生成配置时不检查端口占用，实际启动前再检查。
 
 安装器第一次运行时生成 `.env`（权限 0600），包括独立随机数据库密码、管理员初始密码、32 字节 Base64 加密密钥；再运行 `docker compose config --quiet`、`docker compose up --build -d`，等待 Web 和数据库健康接口返回成功。
 
@@ -26,11 +28,13 @@ bash scripts/install.sh --config-only
 
 ## 二、访问方式与 HTTPS
 
+主机端口由 .env 的 `WEB_PORT`、`API_PORT` 控制；旧配置未填写时沿用 3000/8080，不改写既有密钥。改端口时也要同步修改 `APP_ORIGIN`（或保持实际域名）。
+
 Compose 默认仅将 Web `3000` 和 API `8080` 映射到 `127.0.0.1`，数据库和 Redis 不对外映射。
 
-- 服务器本机：浏览器打开 `http://localhost:3000`。
-- 从电脑连接远程 VPS：在你的电脑运行 `ssh -L 3000:127.0.0.1:3000 用户名@服务器地址`，保持 SSH 会话，然后访问本机 `http://localhost:3000`。
-- 使用域名：在服务器的 Nginx/Caddy 等 HTTPS 反向代理中，将外部站点转发到 `http://127.0.0.1:3000`。将 `.env` 的 `APP_ORIGIN` 设为浏览器访问的完整 HTTPS 源地址，例如 `https://learn.example.com`（不可附加路径），随后 `docker compose up -d` 使配置生效。保持 3000、8080、PostgreSQL、Redis 的容器端口不公开。
+- 服务器本机：浏览器打开 `http://localhost:<WEB_PORT>`。
+- 从电脑连接远程 VPS：在你的电脑运行 `ssh -L <WEB_PORT>:127.0.0.1:<WEB_PORT> 用户名@服务器地址`，保持 SSH 会话，然后访问本机 `http://localhost:<WEB_PORT>`。
+- 使用域名：在服务器的 Nginx/Caddy 等 HTTPS 反向代理中，将外部站点转发到 `http://127.0.0.1:<WEB_PORT>`。将 `.env` 的 `APP_ORIGIN` 设为浏览器访问的完整 HTTPS 源地址，例如 `https://learn.example.com`（不可附加路径），随后 `docker compose up -d` 使配置生效。保持 3000、8080、PostgreSQL、Redis 的容器端口不公开。
 
 浏览器请求经 Next.js 同源转发到内部 API，无需另行公开 API。上传 PDF 时，反向代理的请求体上限须覆盖题目与答案文件合计大小，建议至少 70MB，并酌情设置上传超时。只在有 HTTPS 证书、实际域名及反代正确配置后才开放公网访问。
 
@@ -85,7 +89,7 @@ docker compose up --build -d
 | 模型无权限 | 模型及服务商是否启用、账号所属身份组是否授权 |
 | 运行脚本后已有管理员密码没变 | 正常行为：初始密码只用于首次引导，不用于重置老账号 |
 
-健康接口：`curl -fsS http://127.0.0.1:8080/api/v1/health`。
+健康接口（替换为实际 API_PORT）：`curl -fsS http://127.0.0.1:<API_PORT>/api/v1/health`。
 
 安装脚本的隔离测试（无需 Docker 或真实 API Key）：
 
