@@ -11,8 +11,8 @@
 准备 **Docker Engine + Docker Compose v2**，并安装 **Git、OpenSSL、curl**。可参考 [Docker 官方安装说明](https://docs.docker.com/engine/install/)；无需在主机单独安装 Go、Node 或 PostgreSQL。
 
 ```bash
-git clone https://github.com/basumobai/english.git
-cd english
+git clone https://github.com/basumobai/learning.git
+cd learning
 bash scripts/install.sh
 ```
 
