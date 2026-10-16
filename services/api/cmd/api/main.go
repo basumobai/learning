@@ -31,7 +31,7 @@ func main() {
 	}
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("database configuration invalid; check DATABASE_URL without sharing credentials")
 	}
 	db.SetMaxOpenConns(10)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -43,7 +43,7 @@ func main() {
 		time.Sleep(time.Second)
 	}
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("database unavailable or authentication failed; restore the original .env and see docs/DEPLOY.md; database has not been reset")
 	}
 	if err := migrate(ctx, db); err != nil {
 		log.Fatal(err)

@@ -291,10 +291,16 @@ func TestLearningPDFReviewPipeline(t *testing.T) {
 					images++
 				}
 			}
-			if images != 2 {
-				t.Error("question and answer page images were not both provided")
+			if !strings.Contains(prompt, "question_key") && images != 1 {
+				t.Error("each transcription task must receive only its own PDF page image")
 			}
 			text = `{"questions":[{"source_key":"1","kind":"reading","content":{"text":"Choose.","passage":"The book helped me.","parts":[{"id":"1","text":"What helped me?","choices":[{"id":"A","text":"The book"},{"id":"B","text":"The pen"}],"points":2}]},"solution":{"answers":{"1":"A"},"explanation":"The book is the subject.","rubric":"2 points"},"question_pages":[1],"answer_pages":[1],"answer_quote":"1. A. The book.","needs_review":false,"figures":[{"page":1,"bbox":[0.1,0.25,0.5,0.4],"alt":"Original book diagram"}]}]}`
+			if strings.Contains(prompt, `返回{"answers"`) {
+				text = `{"answers":[{"source_key":"1","solution":{"answers":{"1":"A"},"explanation":"The book is the subject.","rubric":"2 points"},"answer_pages":[1],"answer_quote":"1. A. The book."}]}`
+			}
+		}
+		if strings.Contains(prompt, "question_key") {
+			text = `{"matches":[{"question_key":"1","answer_key":"1"}]}`
 		}
 		raw, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": text}, "finish_reason": "stop"}}})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw)), Header: http.Header{}}, nil
@@ -306,7 +312,7 @@ func TestLearningPDFReviewPipeline(t *testing.T) {
 	if _, err = s.extractPDF(ctx, learningJobPayload{DocumentID: "doc", Chapters: []chapterSelection{chapter}}); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 2 {
+	if calls.Load() != 4 {
 		t.Fatal("dynamic analysis generated at import")
 	}
 	var status string

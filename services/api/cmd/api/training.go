@@ -50,13 +50,20 @@ type listeningQuestion struct {
 	Evidence    string   `json:"evidence"`
 }
 type listeningLesson struct {
-	Title       string              `json:"title"`
-	Transcript  string              `json:"transcript"`
-	Translation string              `json:"translation"`
-	Questions   []listeningQuestion `json:"questions"`
+	Title         string              `json:"title"`
+	Transcript    string              `json:"transcript"`
+	Translation   string              `json:"translation"`
+	Questions     []listeningQuestion `json:"questions"`
+	Format        string              `json:"format,omitempty"`
+	Scenario      string              `json:"scenario,omitempty"`
+	Keywords      []string            `json:"keywords,omitempty"`
+	SpeakingTasks []speakingTask      `json:"speaking_tasks,omitempty"`
 }
 
 func (l listeningLesson) validate() error {
+	if l.Format != "" && l.Format != "choice" {
+		return l.validateSpeaking()
+	}
 	if l.Title == "" || len(l.Title) > 300 || len(l.Transcript) < 200 || len(l.Transcript) > 4000 || l.Translation == "" || len(l.Questions) < 1 || len(l.Questions) > 5 {
 		return fmt.Errorf("incomplete listening lesson")
 	}
@@ -83,6 +90,8 @@ func (s *server) generateTraining(w http.ResponseWriter, r *http.Request) {
 		Kind      string `json:"kind"`
 		Text      string `json:"text"`
 		Level     string `json:"level"`
+		Format    string `json:"format"`
+		Focus     string `json:"focus"`
 	}
 	if decodeLimit(r, &input, 32768) != nil || !requestIDPattern.MatchString(input.RequestID) || (input.Kind != "sentence" && input.Kind != "listening") || strings.TrimSpace(input.Text) == "" || len([]rune(input.Text)) > 4000 {
 		fail(w, 400, "训练输入无效")
@@ -90,6 +99,14 @@ func (s *server) generateTraining(w http.ResponseWriter, r *http.Request) {
 	}
 	if input.Kind == "listening" && (len([]rune(input.Text)) > 200 || (input.Level != "A2" && input.Level != "B1" && input.Level != "B2")) {
 		fail(w, 400, "听力主题最多 200 字符，难度请选择 A2/B1/B2")
+		return
+	}
+	if input.Kind == "listening" && input.Format != "" && input.Format != "choice" && input.Format != "guangdong_a" && input.Format != "guangdong_b" && input.Format != "guangdong_c" {
+		fail(w, 400, "听说题型无效")
+		return
+	}
+	if len(input.Focus) > 80 {
+		fail(w, 400, "训练重点过长")
 		return
 	}
 	m, err := s.allowedModel(r.Context(), input.ModelID, "chat")
@@ -110,6 +127,10 @@ func (s *server) generateTraining(w http.ResponseWriter, r *http.Request) {
 	if input.Kind == "listening" {
 		prompt = s.taskPrompt(r.Context(), "listening")
 		content = "难度：" + input.Level + "。主题：" + input.Text
+		if strings.HasPrefix(input.Format, "guangdong_") {
+			prompt = s.taskPrompt(r.Context(), input.Format) + speakingContract
+			content += "。format=" + input.Format + "。训练重点：" + input.Focus
+		}
 	}
 	text, err := s.completion(r.Context(), m, []chatMessage{{"system", tutorPrompt + "\n" + prompt}, {"user", content}}, true)
 	if err != nil {
@@ -131,6 +152,9 @@ func (s *server) generateTraining(w http.ResponseWriter, r *http.Request) {
 		err = decodeGenerated(text, &lesson)
 		if err == nil {
 			err = lesson.validate()
+		}
+		if err == nil && input.Format != "" && input.Format != "choice" && lesson.Format != input.Format {
+			err = fmt.Errorf("incorrect requested format")
 		}
 		payload = lesson
 		title = lesson.Title
@@ -164,8 +188,10 @@ func (s *server) generateTraining(w http.ResponseWriter, r *http.Request) {
 }
 
 type listeningAnswers struct {
-	RequestID string `json:"request_id"`
-	Answers   []int  `json:"answers"`
+	RequestID string   `json:"request_id"`
+	Answers   []int    `json:"answers"`
+	Responses []string `json:"responses,omitempty"`
+	Notes     string   `json:"notes,omitempty"`
 }
 
 func trainingPublic(id, kind string, payload, answers []byte) map[string]any {
@@ -176,6 +202,9 @@ func trainingPublic(id, kind string, payload, answers []byte) map[string]any {
 	}
 	var lesson listeningLesson
 	_ = json.Unmarshal(payload, &lesson)
+	if len(lesson.SpeakingTasks) > 0 {
+		return speakingPublic(id, lesson, answers)
+	}
 	result["title"] = lesson.Title
 	questions := []map[string]any{}
 	for i, q := range lesson.Questions {
@@ -207,8 +236,8 @@ func trainingPublic(id, kind string, payload, answers []byte) map[string]any {
 }
 func (s *server) training(w http.ResponseWriter, r *http.Request) {
 	var kind string
-	var payload, answers []byte
-	err := s.db.QueryRowContext(r.Context(), `SELECT kind,payload,answers FROM training_sessions WHERE id=$1 AND user_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&kind, &payload, &answers)
+	var payload, answers, feedback []byte
+	err := s.db.QueryRowContext(r.Context(), `SELECT kind,payload,answers,speaking_feedback FROM training_sessions WHERE id=$1 AND user_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&kind, &payload, &answers, &feedback)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "训练不存在")
 		return
@@ -217,7 +246,11 @@ func (s *server) training(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "training restore", err)
 		return
 	}
-	respond(w, 200, trainingPublic(r.PathValue("id"), kind, payload, answers))
+	result := trainingPublic(r.PathValue("id"), kind, payload, answers)
+	if len(feedback) > 0 {
+		result["speaking_feedback"] = json.RawMessage(feedback)
+	}
+	respond(w, 200, result)
 }
 func (s *server) trainingHistory(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.QueryContext(r.Context(), `SELECT id,kind,title,created_at FROM training_sessions WHERE user_id=$1 ORDER BY created_at DESC`, userID(r.Context()))
@@ -244,7 +277,7 @@ func (s *server) trainingHistory(w http.ResponseWriter, r *http.Request) {
 }
 func (s *server) listeningAnswer(w http.ResponseWriter, r *http.Request) {
 	var input listeningAnswers
-	if decode(r, &input) != nil || !requestIDPattern.MatchString(input.RequestID) {
+	if decodeLimit(r, &input, 64000) != nil || !requestIDPattern.MatchString(input.RequestID) || len(input.Notes) > 8000 {
 		fail(w, 400, "答案格式无效")
 		return
 	}
@@ -266,9 +299,15 @@ func (s *server) listeningAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var lesson listeningLesson
-	if json.Unmarshal(payload, &lesson) != nil || len(input.Answers) != len(lesson.Questions) {
+	if json.Unmarshal(payload, &lesson) != nil || len(input.Answers) != len(lesson.Questions) || len(input.Responses) != len(lesson.SpeakingTasks) {
 		fail(w, 400, "请完成所有题目")
 		return
+	}
+	for _, text := range input.Responses {
+		if len([]rune(text)) > 4000 {
+			fail(w, 400, "单项作答最多4000字")
+			return
+		}
 	}
 	for _, n := range input.Answers {
 		if n < 0 || n > 3 {

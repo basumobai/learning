@@ -45,7 +45,7 @@ func (s *server) learningJob(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
-	if kind == "outline" || kind == "extract" || kind == "word_options" {
+	if kind == "outline" || kind == "extract" || kind == "ocr" || kind == "word_options" {
 		if account(r.Context()).Role != "admin" {
 			fail(w, 403, "需要管理员权限")
 			return
@@ -182,6 +182,12 @@ func (s *server) processLearningJob(parent context.Context) error {
 				err = fmt.Errorf("需要管理员权限")
 			} else {
 				result, err = s.outlinePDF(ctx, p.DocumentID)
+			}
+		case "ocr":
+			if user.Role != "admin" {
+				err = fmt.Errorf("需要管理员权限")
+			} else {
+				result, err = s.recognizePDF(ctx, p.DocumentID)
 			}
 		case "extract":
 			if user.Role != "admin" {

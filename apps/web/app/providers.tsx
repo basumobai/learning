@@ -8,7 +8,7 @@ import {
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, authState, setCSRF, type User } from "../lib/api";
+import { api, APIError, authState, setCSRF, type User } from "../lib/api";
 import { Icon, type IconName } from "./icons";
 import { ViewportFrame } from "./components/ViewportFrame";
 
@@ -20,11 +20,14 @@ const AuthContext = createContext<{
 export function Providers({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
+  const [error, setError] = useState("");
   const refresh = useCallback(async () => {
+    setError("");
     try {
       setUser((await authState()).user);
-    } catch {
-      setUser(null);
+    } catch (e) {
+      if (e instanceof APIError && e.status === 401) setUser(null);
+      else setError("学习服务暂时不可用，请稍后重试。恢复后会继续读取账户。");
     } finally {
       setReady(true);
     }
@@ -35,7 +38,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, ready, refresh }}>
       <ViewportFrame />
-      {children}
+      {error ? <main className="shell"><section className="panel glass" role="alert"><h1>暂时无法连接学习服务</h1><p>{error}</p><button className="primary" onClick={() => void refresh()}>重新连接</button></section></main> : children}
     </AuthContext.Provider>
   );
 }
@@ -130,9 +133,9 @@ export function Navigation() {
         <span className="account-avatar" aria-hidden="true">
           {user?.display_name?.slice(0, 1) || "E"}
         </span>
-        <span className="account-name" title={user?.display_name}>
+        <Link href="/settings#security" className="account-name" title="账户与密码设置" aria-label="账户与密码设置">
           {user?.display_name}
-        </span>
+        </Link>
         <button
           className="quiet logout-button"
           onClick={logout}

@@ -1,4 +1,5 @@
 "use client";
+import { ServerPDFInbox, DocumentOCR } from "../../components/ServerPDFInbox";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, upload, type Model } from "../../../lib/api";
@@ -228,7 +229,7 @@ export default function AdminLearning() {
           <section className="panel glass">
             <h2>每个用途，单独配置。</h2>
             <p>
-              学生调用平台模型仍受权限组控制。作文需要至少两个独立评审模型与一个主审。PDF识别请选择视觉模型。
+              学生调用平台模型仍受权限组控制。PDF流程分为扫描页OCR、目录识别、题干提取、答案提取、题答配对；各任务可独立配置提示词和模型。OCR与图文提取需支持视觉输入的模型，题答配对可用文本模型。旧“题目与答案入库”配置仅保留作为升级参考。
             </p>
             <label>
               任务
@@ -372,6 +373,7 @@ export default function AdminLearning() {
         )}
         {tab === "documents" && (
           <>
+            <ServerPDFInbox password={password} onImported={load} />
             <section className="panel glass">
               <h2>题目与答案 PDF</h2>
               <p className="setting-note">
@@ -540,6 +542,7 @@ export default function AdminLearning() {
               </div>
               {doc && (
                 <>
+                  <DocumentOCR id={doc.id} password={password} />
                   <p>
                     核对物理页码（从1开始）。答案页不确定时，请人工补齐。目录完成后重新选择资料。
                   </p>
