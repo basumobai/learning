@@ -17,15 +17,17 @@ type Type struct {
 func Types(subject string) []Type {
 	switch subject {
 	case "chinese":
-		return []Type{{"modern_reading", "现代文阅读", false}, {"classical_reading", "文言文阅读", false}, {"poetry", "古代诗歌阅读", false}, {"memorization", "名篇名句默写", false}, {"language_use", "语言文字运用", false}, {"essay", "作文训练", false}}
+		return []Type{{"modern_i", "现代文阅读Ⅰ · 信息类", false}, {"modern_ii", "现代文阅读Ⅱ · 文学类", false}, {"classical_reading", "文言文阅读", false}, {"poetry", "古代诗歌阅读", false}, {"memorization", "名篇名句默写", false}, {"language_use", "语言文字运用", false}, {"essay", "作文 · 材料写作", false}, {"modern_reading", "现代文阅读 · 旧资料综合分类", false}}
 	case "english":
-		return []Type{{"reading", "阅读理解", true}, {"seven_five", "七选五", true}, {"cloze", "完形填空", true}, {"grammar_fill", "语法填空", false}, {"practical_writing", "应用文写作", false}, {"continuation", "读后续写", false}, {"speaking", "英语听说", false}}
+		return []Type{{"reading", "阅读理解 · A–D篇", true}, {"seven_five", "阅读七选五", true}, {"cloze", "完形填空", true}, {"grammar_fill", "语法填空", false}, {"practical_writing", "应用文写作", false}, {"continuation", "读后续写", false}, {"speaking_a", "听说A · 模仿朗读", false}, {"speaking_b", "听说B · 角色扮演（三问五答）", false}, {"speaking_c", "听说C · 故事复述", false}, {"speaking", "英语听说 · 旧资料综合分类", false}}
 	case "math":
 		return []Type{{"single_choice", "单项选择", true}, {"multiple_choice", "多项选择", true}, {"fill", "填空题", false}, {"solution", "解答题", false}}
 	case "physics":
 		return []Type{{"single_choice", "单项选择", true}, {"multiple_choice", "多项选择", true}, {"experiment", "实验题", false}, {"calculation", "计算题", false}}
-	case "chemistry", "biology":
-		return []Type{{"single_choice", "选择题", true}, {"non_choice", "非选择题", false}}
+	case "chemistry":
+		return []Type{{"single_choice", "单项选择题", true}, {"chemical_experiment", "非选择 · 化学实验", false}, {"industrial_process", "非选择 · 工艺流程", false}, {"reaction_principles", "非选择 · 反应原理", false}, {"organic_synthesis", "非选择 · 有机推断与合成", false}, {"structure_properties", "非选择 · 物质结构与性质", false}, {"non_choice", "非选择 · 跨模块综合／旧资料", false}}
+	case "biology":
+		return []Type{{"single_choice", "单项选择题", true}, {"short_answer", "非选择 · 填空与简答", false}, {"experimental_design", "非选择 · 实验探究与设计", false}, {"data_analysis", "非选择 · 图表与信息分析", false}, {"genetics_analysis", "非选择 · 遗传推理", false}, {"non_choice", "非选择 · 跨模块综合／旧资料", false}}
 	}
 	return nil
 }

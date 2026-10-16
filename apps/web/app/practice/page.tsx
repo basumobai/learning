@@ -19,6 +19,8 @@ import {
 } from "../components/LearningModelPicker";
 import { LearningFigure } from "../components/LearningFigure";
 import { AdaptivePanel } from "../components/AdaptivePanel";
+import { ExamStructure } from "../components/ExamStructure";
+import type { CatalogSubject } from "../../lib/curriculum";
 import { TimelinePlayer } from "../components/TimelinePlayer";
 type Chapter = {
   id: string;
@@ -27,13 +29,13 @@ type Chapter = {
   title: string;
   textbook: string;
   term: string;
+  edition?: string;
+  volume?: string;
+  curriculum_chapter?: string;
   question_count: number;
 };
 type Catalog = {
-  subjects: {
-    id: string;
-    types: { id: string; name: string; objective: boolean }[];
-  }[];
+  subjects: CatalogSubject[];
   chapters: Chapter[];
 };
 type Feedback = {
@@ -107,6 +109,8 @@ export default function Practice() {
     [kind, setKind] = useState(""),
     [textbook, setTextbook] = useState(""),
     [term, setTerm] = useState(""),
+    [edition, setEdition] = useState(""),
+    [volume, setVolume] = useState(""),
     [chapters, setChapters] = useState<string[]>([]),
     [attempt, setAttempt] = useState<Attempt | null>(null),
     [answers, setAnswers] = useState<Record<string, string>>({}),
@@ -185,6 +189,8 @@ export default function Practice() {
     setChapters([]);
     setTextbook("");
     setTerm("");
+    setEdition("");
+    setVolume("");
   }, [subject]);
   useEffect(() => {
     if (!modelsChanged.current) return;
@@ -404,6 +410,8 @@ export default function Practice() {
         chapter_ids: chapters,
         textbook,
         term,
+        edition,
+        volume,
         request_id: nextRequest.current,
       });
       nextRequest.current = "";
@@ -477,7 +485,9 @@ export default function Practice() {
       (c) =>
         c.subject_id === subject &&
         (!textbook || c.textbook === textbook) &&
-        (!term || c.term === term),
+        (!term || c.term === term) &&
+        (!edition || c.edition === edition) &&
+        (!volume || c.volume === volume),
     ) || [];
   const submitted = !!attempt?.submitted_at;
   const timeline = job?.result as Timeline | undefined;
@@ -542,7 +552,96 @@ export default function Practice() {
           <div className="practice-setup">
             <section className="panel glass filter-panel">
               <h2>今天练什么？</h2>
+              <ExamStructure
+                subject={catalog?.subjects.find((s) => s.id === subject)}
+              />
+              {catalog?.subjects.find((s) => s.id === subject)?.curriculum && (
+                <p className="setting-note">
+                  {
+                    catalog.subjects.find((s) => s.id === subject)!.curriculum!
+                      .note
+                  }
+                </p>
+              )}
               <div className="learning-filters">
+                {catalog?.subjects.find((s) => s.id === subject)
+                  ?.curriculum && (
+                  <>
+                    <label>
+                      教材版本
+                      <select
+                        value={edition}
+                        onChange={(e) => {
+                          setEdition(e.target.value);
+                          setTextbook("");
+                          setVolume("");
+                          setChapters([]);
+                        }}
+                      >
+                        <option value="">
+                          {subject === "english"
+                            ? "北师大版2019及待核对旧资料"
+                            : "全部版本"}
+                        </option>
+                        {Array.from(
+                          new Set([
+                            ...(subject === "english" ? ["北师大版2019"] : []),
+                            ...(catalog.chapters
+                              .filter(
+                                (c) =>
+                                  c.subject_id === subject &&
+                                  (subject !== "english" ||
+                                    c.edition === "北师大版2019"),
+                              )
+                              .map((c) => c.edition)
+                              .filter(Boolean) as string[]),
+                          ]),
+                        ).map((v) => (
+                          <option key={v}>{v}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      教材册次
+                      <select
+                        value={volume}
+                        onChange={(e) => {
+                          setVolume(e.target.value);
+                          setTextbook("");
+                          setChapters([]);
+                        }}
+                      >
+                        <option value="">全部册次</option>
+                        {Array.from(
+                          new Set([
+                            ...(catalog.subjects.find((s) => s.id === subject)
+                              ?.curriculum?.volumes || []),
+                            ...(catalog.chapters
+                              .filter((c) => c.subject_id === subject)
+                              .map((c) => c.volume)
+                              .filter(Boolean) as string[]),
+                          ]),
+                        ).map((v) => (
+                          <option key={v} value={v}>
+                            {v} ·{" "}
+                            {catalog.chapters
+                              .filter(
+                                (c) =>
+                                  c.subject_id === subject &&
+                                  c.volume === v &&
+                                  (!edition || c.edition === edition),
+                              )
+                              .reduce(
+                                (n, c) => n + Number(c.question_count),
+                                0,
+                              )}
+                            题
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
                 <label>
                   题型
                   <select
@@ -552,6 +651,10 @@ export default function Practice() {
                     {types.map((t) => (
                       <option value={t.id} key={t.id}>
                         {t.name}
+                        {catalog?.subjects.find((s) => s.id === subject)
+                          ?.published_counts
+                          ? ` · ${catalog.subjects.find((s) => s.id === subject)!.published_counts![t.id] || 0}题`
+                          : ""}
                       </option>
                     ))}
                   </select>
@@ -619,6 +722,9 @@ export default function Practice() {
                         }
                       />
                       <span>
+                        {c.curriculum_chapter
+                          ? `${c.curriculum_chapter} / `
+                          : ""}
                         {c.title}
                         <small>
                           {c.textbook} · {c.question_count}题

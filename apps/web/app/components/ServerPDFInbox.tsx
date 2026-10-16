@@ -46,7 +46,7 @@ export function ServerPDFInbox({
       });
       await onImported();
       setMessage(
-        "PDF 已接收：文本提取 → 扫描页OCR → 目录识别。请在下方选择资料查看进度。",
+        "PDF 已接收：文本提取 → 扫描页OCR → 学科与教材归类。请在下方选择资料核对版本与册次。",
       );
     } catch (e) {
       setMessage((e as Error).message);
@@ -83,6 +83,7 @@ export function ServerPDFInbox({
           <label>
             科目
             <select name="subject_id">
+              <option value="">自动识别学科与教材（推荐）</option>
               {[
                 ["english", "英语"],
                 ["chinese", "语文"],
@@ -99,7 +100,10 @@ export function ServerPDFInbox({
           </label>
           <label>
             教材／册次
-            <input name="textbook" placeholder="北师大版2019 选择性必修一" />
+            <input
+              name="textbook"
+              placeholder="自动识别可留空；英语固定北师大版2019"
+            />
           </label>
           <label>
             学期

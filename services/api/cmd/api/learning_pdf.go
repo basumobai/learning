@@ -58,8 +58,12 @@ func (s *server) uploadLearningDocument(w http.ResponseWriter, r *http.Request) 
 	s.storeLearningDocument(w, r, r.FormValue("title"), r.FormValue("subject_id"), r.FormValue("textbook"), r.FormValue("term"), q, a)
 }
 func (s *server) storeLearningDocument(w http.ResponseWriter, r *http.Request, title, subject, textbook, term string, q, a []byte) {
-	if strings.TrimSpace(title) == "" || len([]rune(title)) > 200 || len(platform.Types(subject)) == 0 || len(textbook) > 200 || len(term) > 100 {
+	if strings.TrimSpace(title) == "" || len([]rune(title)) > 200 || subject != "" && len(platform.Types(subject)) == 0 || len(textbook) > 200 || len(term) > 100 {
 		fail(w, 400, "科目、标题或教材范围无效")
+		return
+	}
+	if subject == "english" && otherEnglishEdition(textbook) {
+		fail(w, 400, "英语教材固定北师大版2019，请核对PDF版本")
 		return
 	}
 	id := security.Token(18)
@@ -70,13 +74,18 @@ func (s *server) storeLearningDocument(w http.ResponseWriter, r *http.Request, t
 	}
 	defer tx.Rollback()
 	fingerprint := security.Digest(subject + ":" + textbook + ":" + term + ":" + title + ":" + security.Digest(string(q)) + ":" + security.Digest(string(a)))
-	err = tx.QueryRowContext(r.Context(), `INSERT INTO learning_documents(id,owner_id,title,subject_id,textbook,term,question_pdf,answer_pdf,source_fingerprint) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(source_fingerprint) DO UPDATE SET source_fingerprint=EXCLUDED.source_fingerprint RETURNING id`, id, userID(r.Context()), title, subject, textbook, term, q, a, fingerprint).Scan(&id)
+	var subjectValue any
+	if subject != "" {
+		subjectValue = subject
+	}
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO learning_documents(id,owner_id,title,subject_id,textbook,term,question_pdf,answer_pdf,source_fingerprint,scope_confirmed) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,false) ON CONFLICT(source_fingerprint) DO UPDATE SET source_fingerprint=EXCLUDED.source_fingerprint RETURNING id`, id, userID(r.Context()), title, subjectValue, textbook, term, q, a, fingerprint).Scan(&id)
 	if err != nil {
 		s.dbError(w, "store PDFs", err)
 		return
 	}
 	job := security.Token(18)
-	err = tx.QueryRowContext(r.Context(), `INSERT INTO learning_jobs(id,owner_id,kind,dedupe_key,payload) VALUES($1,$2,'outline',$3,jsonb_build_object('document_id',$3::text)) ON CONFLICT(owner_id,kind,dedupe_key) DO UPDATE SET dedupe_key=EXCLUDED.dedupe_key RETURNING id`, job, userID(r.Context()), id).Scan(&job)
+	kind := "identify"
+	err = tx.QueryRowContext(r.Context(), `INSERT INTO learning_jobs(id,owner_id,kind,dedupe_key,payload) VALUES($1,$2,$4,$3,jsonb_build_object('document_id',$3::text)) ON CONFLICT(owner_id,kind,dedupe_key) DO UPDATE SET dedupe_key=EXCLUDED.dedupe_key RETURNING id`, job, userID(r.Context()), id, kind).Scan(&job)
 	if err == nil {
 		err = tx.Commit()
 	}
@@ -88,17 +97,19 @@ func (s *server) storeLearningDocument(w http.ResponseWriter, r *http.Request, t
 }
 
 type chapterSelection struct {
-	Key           string `json:"key"`
-	Title         string `json:"title"`
-	Parent        string `json:"parent"`
-	QuestionPages []int  `json:"question_pages"`
-	AnswerPages   []int  `json:"answer_pages"`
-	Note          string `json:"note"`
+	Key               string `json:"key"`
+	Title             string `json:"title"`
+	Parent            string `json:"parent"`
+	QuestionPages     []int  `json:"question_pages"`
+	AnswerPages       []int  `json:"answer_pages"`
+	Note              string `json:"note"`
+	Volume            string `json:"volume,omitempty"`
+	CurriculumChapter string `json:"curriculum_chapter,omitempty"`
 }
 
 func (s *server) learningDocuments(w http.ResponseWriter, r *http.Request) {
 	var data json.RawMessage
-	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT d.id,d.title,d.subject_id,d.textbook,d.term,d.outline,d.created_at,(SELECT jsonb_agg(jsonb_build_object('id',j.id,'kind',j.kind,'status',j.status,'error',j.error) ORDER BY j.created_at DESC) FROM learning_jobs j WHERE j.owner_id=$1 AND j.payload->>'document_id'=d.id) AS jobs FROM learning_documents d ORDER BY d.created_at DESC LIMIT 100) t`, userID(r.Context())).Scan(&data)
+	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT d.id,d.title,COALESCE(d.subject_id,'') subject_id,d.textbook,d.term,d.edition,d.volume,d.scope_confirmed,d.recognition,d.outline,d.created_at,(SELECT jsonb_agg(jsonb_build_object('id',j.id,'kind',j.kind,'status',j.status,'error',j.error) ORDER BY j.created_at DESC) FROM learning_jobs j WHERE j.owner_id=$1 AND j.payload->>'document_id'=d.id) AS jobs FROM learning_documents d ORDER BY d.created_at DESC LIMIT 100) t`, userID(r.Context())).Scan(&data)
 	if err != nil {
 		s.dbError(w, "document list", err)
 		return
@@ -139,8 +150,19 @@ func (s *server) extractLearningDocument(w http.ResponseWriter, r *http.Request)
 	respond(w, 202, map[string]any{"id": ids[0], "jobs": ids})
 }
 func (s *server) validateChapterPages(ctx context.Context, document string, chapters []chapterSelection) error {
+	var confirmed bool
+	var subject string
+	if err := s.db.QueryRowContext(ctx, `SELECT scope_confirmed,COALESCE(subject_id,'') FROM learning_documents WHERE id=$1`, document).Scan(&confirmed, &subject); err != nil {
+		return fmt.Errorf("资料不存在")
+	}
+	if !confirmed || subject == "" {
+		return fmt.Errorf("请先确认PDF的学科、教材版本与册次，不能将自动猜测直接入库")
+	}
 	keys := map[string]bool{}
 	for _, c := range chapters {
+		if len([]rune(c.CurriculumChapter)) > 200 || c.Volume != "" && !platform.ValidVolume(subject, c.Volume) {
+			return fmt.Errorf("教材章节或册次无效，请核对目录")
+		}
 		if c.Key == "" || len(c.Key) > 100 || keys[c.Key] || strings.TrimSpace(c.Title) == "" || len(c.QuestionPages) == 0 || len(c.QuestionPages) > 8 || len(c.AnswerPages) == 0 || len(c.AnswerPages) > 8 {
 			return fmt.Errorf("每个小节需1至8页题目和1至8页答案；长章节请拆成小节")
 		}
@@ -309,6 +331,14 @@ func imagePart(data []byte) map[string]any {
 }
 func textPart(text string) map[string]any { return map[string]any{"type": "text", "text": text} }
 func (s *server) outlinePDF(ctx context.Context, id string) (any, error) {
+	var subject, edition, volume string
+	var confirmed bool
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(subject_id,''),edition,volume,scope_confirmed FROM learning_documents WHERE id=$1`, id).Scan(&subject, &edition, &volume, &confirmed); err != nil {
+		return nil, err
+	}
+	if !confirmed || subject == "" {
+		return nil, fmt.Errorf("请先确认学科、教材与册次")
+	}
 	models, _, err := s.taskModels(ctx, "outline", false)
 	if err != nil {
 		return nil, err
@@ -366,7 +396,7 @@ func (s *server) outlinePDF(ctx context.Context, id string) (any, error) {
 		all = []chapterSelection{}
 	}
 	for start := scanned; start < len(pages); start += 8 {
-		parts := []map[string]any{textPart("答案索引（页码须管理员复核；空白表示扫描页）：\n" + answerIndex)}
+		parts := []map[string]any{textPart("已确认科目：" + subject + "；教材版本：" + edition + "；册次：" + volume + "。按教材章/Unit/Lesson分层，不要把题型名当教材章节；跨册不确定时不要猜。"), textPart("答案索引（页码须管理员复核；空白表示扫描页）：\n" + answerIndex)}
 		for _, p := range pages[start:min(start+8, len(pages))] {
 			parts = append(parts, textPart(fmt.Sprintf("题目物理页%d：\n%s", p.Page, p.Text)))
 			if len(strings.TrimSpace(p.Text)) < 80 {
@@ -377,7 +407,7 @@ func (s *server) outlinePDF(ctx context.Context, id string) (any, error) {
 				parts = append(parts, imagePart(image))
 			}
 		}
-		text, err := s.learningCompletion(ctx, models[0], s.taskPrompt(ctx, "outline")+` 返回{"chapters":[{"key":"短编号","title":"小节名称","parent":"父章节名称或空","question_pages":[1],"answer_pages":[1],"note":"不确定内容与审核说明"}]}。每小节最多8页题目和8页答案；长章节拆成多个小节。题目页只能取当前提供的物理页。无法确定答案页时answer_pages留空。`, parts)
+		text, err := s.learningCompletion(ctx, models[0], s.taskPrompt(ctx, "outline")+` 返回{"chapters":[{"key":"短编号","title":"小节/Lesson名称","parent":"教材章/Unit名称或空","volume":"当前小节的标准册次；无法确定留空","curriculum_chapter":"教材原目录章/Unit名称；缺少目录依据留空","question_pages":[1],"answer_pages":[1],"note":"教材目录与正文依据、不确定内容与审核说明"}]}。每小节最多8页题目和8页答案；长章节拆成多个小节。题目页只能取当前提供的物理页。无法确定答案页时answer_pages留空。`, parts)
 		if err != nil {
 			return nil, err
 		}
@@ -471,12 +501,20 @@ func (s *server) extractPDF(ctx context.Context, p learningJobPayload) (any, err
 		return nil, err
 	}
 	var err error
-	var subject, textbook, term string
-	if err = s.db.QueryRowContext(ctx, `SELECT subject_id,textbook,term FROM learning_documents WHERE id=$1`, p.DocumentID).Scan(&subject, &textbook, &term); err != nil {
+	var subject, textbook, term, edition, volume string
+	if err = s.db.QueryRowContext(ctx, `SELECT subject_id,textbook,term,edition,volume FROM learning_documents WHERE id=$1`, p.DocumentID).Scan(&subject, &textbook, &term, &edition, &volume); err != nil {
 		return nil, err
 	}
 	added := 0
 	for _, chapter := range p.Chapters {
+		chapterVolume := volume
+		if chapter.Volume != "" {
+			chapterVolume = chapter.Volume
+		}
+		chapterTextbook := textbook
+		if edition != "" && chapterVolume != "" {
+			chapterTextbook = edition + " · " + chapterVolume
+		}
 		types, _ := json.Marshal(platform.Types(subject))
 		heading := textPart("目标小节：" + chapter.Title + "；科目：" + subject + "；允许题型：" + string(types))
 		qparts, aparts := []map[string]any{heading}, []map[string]any{heading}
@@ -517,14 +555,18 @@ func (s *server) extractPDF(ctx context.Context, p learningJobPayload) (any, err
 		chapterID := "chapter-" + security.Digest(p.DocumentID + ":" + chapter.Key)[:24]
 		var parent any
 		if chapter.Parent != "" {
-			pid := "chapter-" + security.Digest(p.DocumentID + ":parent:" + chapter.Parent)[:24]
-			if _, err = tx.ExecContext(ctx, `INSERT INTO learning_chapters(id,subject_id,title,textbook,term) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, pid, subject, chapter.Parent, textbook, term); err != nil {
+			parentKey := p.DocumentID + ":parent:" + chapter.Parent
+			if chapterVolume != "" {
+				parentKey += ":" + chapterVolume
+			}
+			pid := "chapter-" + security.Digest(parentKey)[:24]
+			if _, err = tx.ExecContext(ctx, `INSERT INTO learning_chapters(id,subject_id,title,textbook,term,edition,volume,curriculum_chapter) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING`, pid, subject, chapter.Parent, chapterTextbook, term, edition, chapterVolume, chapter.CurriculumChapter); err != nil {
 				tx.Rollback()
 				return nil, err
 			}
 			parent = pid
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO learning_chapters(id,subject_id,parent_id,title,textbook,term) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, chapterID, subject, parent, chapter.Title, textbook, term)
+		_, err = tx.ExecContext(ctx, `INSERT INTO learning_chapters(id,subject_id,parent_id,title,textbook,term,edition,volume,curriculum_chapter) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING`, chapterID, subject, parent, chapter.Title, chapterTextbook, term, edition, chapterVolume, chapter.CurriculumChapter)
 		if err != nil {
 			tx.Rollback()
 			return nil, err

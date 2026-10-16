@@ -40,7 +40,7 @@ WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai
 
 自己的密码在 **设置 → 密码与登录安全**，也可点击顶部姓名直达；管理员重置他人密码在 **管理 → 账户**。
 
-服务器 PDF 放在部署目录的 **`data/pdf/`**，本次部署即 `/www/wwwroot/learning/learning/data/pdf/`。进入 **多学科管理 → 资料入库 → 从服务器目录导入PDF** 刷新并选择题目、答案。扫描页OCR、目录、题干、答案与配对分别配置模型，可查看逐页文字。详见 [PDF/OCR与听说流程](docs/IMPORT_AND_LISTENING.md)。
+服务器 PDF 放在部署目录的 **`data/pdf/`**，本次部署即 `/www/wwwroot/learning/learning/data/pdf/`。进入 **多学科管理 → 资料入库 → 从服务器目录导入PDF** 刷新并选择题目、答案。默认自动建议学科、教材版本和册次，附PDF页码依据；确认后识别章/Unit/Lesson，再提取草稿。英语固定北师大版2019，其他科目按实际教材版本核对。OCR、归类、目录、题干、答案与配对分别配置模型。详见 [教材与高考题型](docs/CURRICULUM.md)、[PDF/OCR与听说流程](docs/IMPORT_AND_LISTENING.md)。
 
 ## 常用运维命令
 

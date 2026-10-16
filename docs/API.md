@@ -1,5 +1,7 @@
 # API v1
 
+教材归档扩展：`GET /learning/catalog` 的学科项增加 `exam`、`curriculum`、`published_counts`，章节增加 `edition`、`volume`、`curriculum_chapter`。新PDF导入先排队 `identify`，`subject_id` 可留空；手动提供的科目仅作线索。管理员使用 `POST /admin/learning/documents/{id}/scope`，提交 `{subject_id,edition,volume,term,admin_password}` 确认归属，随后排队章节任务。确认前禁止目录/题目提取；运行中或重复确认返回409。英语版本仅允许北师大版2019。练习请求可按 `edition`、`volume` 与原有教材/学期/章节字段共同过滤。详见 [教材与题型](CURRICULUM.md)。
+
 Next.js 同源 `/api/v1` 转发到 Go。除 GET /health 和 POST /auth/login 外均需会话 Cookie。写入携带 `X-CSRF-Token`，无 Origin 的程序客户端还需 `X-ELS-Client:web`；Origin 必须匹配 APP_ORIGIN。
 
 ## 身份、账户、内容

@@ -94,11 +94,12 @@ try {
         }
       };
     });
-    await installMockAPI(ctx);
+    const mock = await installMockAPI(ctx, { curriculum: true });
     const page = await ctx.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     let imported = null;
+    let confirmedScope = null;
     await ctx.route("**/api/v1/admin/learning/local-files", (route) =>
       route.fulfill({
         json: {
@@ -114,7 +115,7 @@ try {
       imported = route.request().postDataJSON();
       await route.fulfill({
         status: 202,
-        json: { id: "inbox-doc", job_id: "outline" },
+        json: { id: "inbox-doc", job_id: "identify" },
       });
     });
     await ctx.route("**/api/v1/admin/learning/documents", (route) =>
@@ -126,12 +127,32 @@ try {
               title: "目录中的资料",
               textbook: "北师大版",
               term: "高二上",
+              scope_confirmed: !!confirmedScope,
+              recognition: {
+                subject_id: "english",
+                edition: "北师大版2019",
+                volume: "选择性必修第一册",
+                source_kind: "exercise",
+                confidence: "medium",
+                evidence: [{ page: 1, quote: "Unit 1 Relationships" }],
+                notes: "核对封面与目录。",
+              },
               outline: { chapters: [] },
               jobs: [],
             },
           ],
         },
       }),
+    );
+    await ctx.route(
+      "**/api/v1/admin/learning/documents/inbox-doc/scope",
+      async (route) => {
+        confirmedScope = route.request().postDataJSON();
+        await route.fulfill({
+          status: 202,
+          json: { job_id: "outline-confirmed" },
+        });
+      },
     );
     await ctx.route(
       "**/api/v1/admin/learning/documents/inbox-doc/ocr",
@@ -175,15 +196,61 @@ try {
     await inbox.getByText(/PDF 已接收/).waitFor();
     assert.equal(imported.question_path, "题目.pdf");
     assert.equal(imported.answer_path, "答案.pdf");
+    assert.equal(
+      imported.subject_id,
+      "",
+      "default import must identify instead of guessing a subject",
+    );
     checks++;
     await page
       .getByRole("button", { name: "目录中的资料", exact: true })
       .click();
+    const scope = page.getByRole("region", { name: "PDF教材归类确认" });
+    await scope.getByLabel("确认教材版本", { exact: true }).waitFor();
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector(
+          '[aria-label="PDF教材归类确认"] input:disabled',
+        ),
+    );
+    assert.equal(
+      await scope.getByLabel("确认教材版本", { exact: true }).isDisabled(),
+      true,
+    );
+    assert.equal(
+      await scope.getByLabel("确认教材册次", { exact: true }).inputValue(),
+      "选择性必修第一册",
+    );
+    checks++;
+    await scope.getByRole("checkbox").check();
+    await scope.getByRole("button", { name: "确认范围并识别章节" }).click();
+    await scope.waitFor({ state: "detached" });
+    assert.equal(confirmedScope.edition, "北师大版2019");
+    assert.equal(confirmedScope.subject_id, "english");
+    checks++;
     await page.getByText(/OCR 识别与逐页核对/).click();
     await page.getByText(/答案 · 第1页 · OCR已识别/).click();
     await page.getByText("请核对公式", { exact: true }).waitFor();
     checks++;
     await noOverflow(page);
+    await page.goto(base + "/practice?subject=english");
+    await page.getByText("广东高考题型框架", { exact: false }).waitFor();
+    await page
+      .getByLabel("教材版本", { exact: true })
+      .selectOption("北师大版2019");
+    await page
+      .getByLabel("教材册次", { exact: true })
+      .selectOption("选择性必修第一册");
+    await page.getByRole("button", { name: "开始练习", exact: true }).click();
+    await page
+      .getByRole("heading", { name: "Choose the subject of the main clause." })
+      .waitFor();
+    const start = mock.requests.findLast(
+      (r) => r.path === "/learning/attempts",
+    );
+    assert.equal(start.body.edition, "北师大版2019");
+    assert.equal(start.body.volume, "选择性必修第一册");
+    checks++;
     const tasks = Array.from({ length: 8 }, (_, i) => ({
       index: i,
       kind: i < 3 ? "ask" : "answer",

@@ -41,6 +41,7 @@ func (s *server) learningRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/admin/learning/documents/{id}/ocr", s.queueLearningOCR)
 	m.HandleFunc("POST /api/v1/admin/learning/documents", s.uploadLearningDocument)
 	m.HandleFunc("POST /api/v1/admin/learning/documents/{id}/extract", s.extractLearningDocument)
+	m.HandleFunc("POST /api/v1/admin/learning/documents/{id}/scope", s.confirmDocumentScope)
 	m.HandleFunc("GET /api/v1/admin/learning/documents/{id}/pages/{kind}/{page}", s.learningPage)
 	m.HandleFunc("GET /api/v1/admin/learning/questions", s.adminLearningQuestions)
 	m.HandleFunc("POST /api/v1/admin/learning/questions/{id}", s.saveLearningQuestion)
@@ -55,13 +56,45 @@ func (s *server) learningRoutes(m *http.ServeMux) {
 func (s *server) learningCatalog(w http.ResponseWriter, r *http.Request) {
 	subjects := []map[string]any{}
 	for _, id := range []string{"chinese", "math", "english", "physics", "chemistry", "biology"} {
-		subjects = append(subjects, map[string]any{"id": id, "types": platform.Types(id)})
+		subjects = append(subjects, map[string]any{"id": id, "types": platform.Types(id), "exam": platform.GuangdongExam(id), "curriculum": platform.Curriculum(id)})
 	}
 	var chapters json.RawMessage
 	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT c.*, (SELECT count(*) FROM learning_questions q WHERE q.chapter_id=c.id AND q.status='published') AS question_count FROM learning_chapters c ORDER BY subject_id,position,title) t`).Scan(&chapters)
 	if err != nil {
 		s.dbError(w, "catalog", err)
 		return
+	}
+	counts := map[string]map[string]int{}
+	rows, err := s.db.QueryContext(r.Context(), `SELECT subject_id,kind,count(*) FROM learning_questions WHERE status='published' GROUP BY subject_id,kind`)
+	if err != nil {
+		s.dbError(w, "catalog distribution", err)
+		return
+	}
+	for rows.Next() {
+		var subject, kind string
+		var count int
+		if err = rows.Scan(&subject, &kind, &count); err != nil {
+			rows.Close()
+			s.dbError(w, "catalog distribution", err)
+			return
+		}
+		if counts[subject] == nil {
+			counts[subject] = map[string]int{}
+		}
+		counts[subject][kind] = count
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		s.dbError(w, "catalog distribution", err)
+		return
+	}
+	for _, subject := range subjects {
+		c := counts[subject["id"].(string)]
+		if c == nil {
+			c = map[string]int{}
+		}
+		subject["published_counts"] = c
 	}
 	respond(w, 200, map[string]any{"region": "广东", "subjects": subjects, "chapters": chapters, "training_rules": map[string]any{"essay_seconds": 1800, "essay_min_han": 851, "reading_seconds": 1800}})
 }
@@ -138,10 +171,16 @@ func (s *server) startLearningAttempt(w http.ResponseWriter, r *http.Request) {
 		Chapters  []string `json:"chapter_ids"`
 		Textbook  string   `json:"textbook"`
 		Term      string   `json:"term"`
+		Edition   string   `json:"edition"`
+		Volume    string   `json:"volume"`
 		RequestID string   `json:"request_id"`
 	}
 	if decodeLimit(r, &in, 16000) != nil || !platform.ValidType(in.Subject, in.Kind) || len(in.Chapters) > 100 || !requestIDPattern.MatchString(in.RequestID) {
 		fail(w, 400, "请选择科目、题型与章节范围")
+		return
+	}
+	if in.Subject == "english" && in.Edition != "" && in.Edition != platform.EnglishEdition {
+		fail(w, 400, "英语教材固定北师大版2019")
 		return
 	}
 	var existing string
@@ -160,7 +199,7 @@ func (s *server) startLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	}
 	var qid string
 	var rev int
-	err = s.db.QueryRowContext(r.Context(), `SELECT q.id,q.revision FROM learning_questions q JOIN learning_chapters c ON c.id=q.chapter_id WHERE q.status='published' AND q.subject_id=$1 AND q.kind=$2 AND (cardinality($3::text[])=0 OR q.chapter_id=ANY($3::text[])) AND ($4='' OR c.textbook=$4) AND ($5='' OR c.term=$5) ORDER BY (SELECT count(*) FROM learning_attempts a WHERE a.user_id=$6 AND a.question_id=q.id),random() LIMIT 1`, in.Subject, in.Kind, in.Chapters, in.Textbook, in.Term, userID(r.Context())).Scan(&qid, &rev)
+	err = s.db.QueryRowContext(r.Context(), `SELECT q.id,q.revision FROM learning_questions q JOIN learning_chapters c ON c.id=q.chapter_id WHERE q.status='published' AND q.subject_id=$1 AND q.kind=$2 AND (cardinality($3::text[])=0 OR q.chapter_id=ANY($3::text[])) AND ($4='' OR c.textbook=$4) AND ($5='' OR c.term=$5) AND ($7='' OR c.edition=$7) AND ($8='' OR c.volume=$8) ORDER BY (SELECT count(*) FROM learning_attempts a WHERE a.user_id=$6 AND a.question_id=q.id),random() LIMIT 1`, in.Subject, in.Kind, in.Chapters, in.Textbook, in.Term, userID(r.Context()), in.Edition, in.Volume).Scan(&qid, &rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "这个范围还没有已审核题目，请管理员导入并发布")
 		return

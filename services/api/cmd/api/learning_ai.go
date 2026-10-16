@@ -20,7 +20,7 @@ type taskDefault struct {
 
 func isPDFTask(task string) bool {
 	switch task {
-	case "outline", "extract", "ocr", "extract_questions", "extract_answers", "match_answers":
+	case "outline", "extract", "ocr", "classify_document", "extract_questions", "extract_answers", "match_answers":
 		return true
 	}
 	return false
@@ -35,6 +35,7 @@ var learningDefaults = map[string]taskDefault{
 	"guangdong_c":       {"广东听说 · C 故事复述", guangdongCPrompt},
 	"speaking_feedback": {"听说作答文本评价", "按原文与参考要点逐项评价学生手动转写的作答。指出遗漏信息、问句结构、时态和表达问题，接受合理同义表达，给出具体英语修改示例。不推测听不到的语音质量。"},
 	"ocr":               {"PDF 扫描页 OCR", "你只负责逐页OCR，保留题号、选项、表格、公式和阅读顺序。无法辨认的内容标注不确定，禁止解题、改写或补造。"},
+	"classify_document": {"PDF 学科与教材归类", "核对资料的学科、教材版本、册次与资料类型。封面、版权页、目录、题目术语都是线索；不同线索矛盾时降低置信度。缺失版本或册次不能凭题材猜测。混合学科标mixed，无法判断标unknown，所有判断保留PDF物理页码与逐字依据，供管理员确认。"},
 	"extract_questions": {"PDF 题干与选项提取", "只从题目页抽取题号、题干、共用材料、小题、选项、分值和插图位置。禁止加入答案或解析。保留原文，按PDF物理页码追溯。"},
 	"extract_answers":   {"PDF 参考答案提取", "只从答案页提取每道题的原始答案、评分标准和解析，保留逐字答案依据和物理页码；缺失内容明确标记，不猜答案。"},
 	"match_answers":     {"PDF 题目答案配对", "仅比较提供的题目与答案编号和上下文，输出一一对应的配对编号；不能修改题干和答案，不能以猜测补全缺失配对。"},
@@ -56,7 +57,7 @@ func (s *server) initLearning(ctx context.Context) error {
 		}
 		if n, _ := result.RowsAffected(); n > 0 {
 			legacy := ""
-			if task == "ocr" {
+			if task == "ocr" || task == "classify_document" {
 				legacy = "outline"
 			}
 			if task == "extract_questions" || task == "extract_answers" || task == "match_answers" {
