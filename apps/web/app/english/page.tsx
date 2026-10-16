@@ -164,7 +164,13 @@ export default function Home() {
     setHint(false);
     setResolution("");
     started.current = Date.now();
-    if (current && !reviewing && !paused) input.current?.focus();
+    if (
+      current &&
+      !reviewing &&
+      !paused &&
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches
+    )
+      input.current?.focus();
     if (reviewing && !paused) ratingFocus.current?.focus();
   }, [current?.id, reviewing, paused]);
 
@@ -304,7 +310,7 @@ export default function Home() {
         return;
       if (
         (event.target as HTMLElement)?.closest(
-          "input, textarea, select, button",
+          'input, textarea, select, button, [contenteditable="true"]',
         )
       )
         return;

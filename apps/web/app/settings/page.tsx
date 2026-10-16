@@ -93,7 +93,6 @@ export default function Settings() {
   return (
     <main className="shell">
       <Navigation />
-      <PersonalAPI />
       <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">YOUR PACE · YOUR ACCOUNT</span>
         <h1>学得稳，也用得安心。</h1>
@@ -342,6 +341,7 @@ export default function Settings() {
           {error}
         </p>
       )}
+      {!auth.user?.must_change_password && <PersonalAPI />}
     </main>
   );
 }

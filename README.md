@@ -59,7 +59,7 @@ bash scripts/install.sh
 
 - [功能与学习流程](docs/LEARNING.md) · [界面设计](docs/FRONTEND.md) · [安全与账号](docs/SECURITY.md)
 - [架构](docs/ARCHITECTURE.md) · [API](docs/API.md) · [数据库](docs/DATABASE.md) · [AI 设计](docs/AI.md) · [产品行为](docs/PRODUCT.md)
-- [验证与预览](docs/LEARNING_VALIDATION.md) · [与 AnkiDroid 对比](docs/ANKIDROID_COMPARISON.md)
+- [验证与预览](docs/LEARNING_VALIDATION.md) · [与 AnkiDroid 对比](docs/ANKIDROID_COMPARISON.md) · [多端布局](docs/RESPONSIVE.md)
 
 ### 开发与测试
 

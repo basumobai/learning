@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { api, upload, type Model } from "../../../lib/api";
 import { subjects } from "../../../lib/learning";
 import { Loading, Navigation, useProtected } from "../../providers";
-import { ModelScopeSelector } from "../../components/ModelScopeSelector";
 type Task = {
   task: string;
   prompt: string;
@@ -76,7 +75,6 @@ export default function AdminLearning() {
       Record<string, { name: string; prompt: string }>
     >({}),
     [models, setModels] = useState<Model[]>([]),
-    [modelProviders, setModelProviders] = useState<{ id: string; name: string }[]>([]),
     [task, setTask] = useState<Task | null>(null),
     [drafts, setDrafts] = useState<Draft[]>([]),
     [draft, setDraft] = useState<Draft | null>(null),
@@ -106,7 +104,7 @@ export default function AdminLearning() {
       api<{ tasks: Task[]; defaults: typeof defaults }>(
         "/admin/learning/tasks",
       ),
-      api<{ models: Model[]; providers: { id: string; name: string }[] }>("/admin/config"),
+      api<{ models: Model[] }>("/admin/config"),
       api<{ sets: WordSet[] }>("/admin/learning/word-sets"),
       api<{ questions: Draft[] }>("/admin/learning/questions"),
       api<{ connections: Cloud[] }>("/admin/learning/cloud"),
@@ -115,7 +113,6 @@ export default function AdminLearning() {
     setTasks(t.tasks);
     setDefaults(t.defaults);
     setModels(c.models.filter((m) => m.kind === "chat"));
-    setModelProviders(c.providers);
     setSets(w.sets);
     setDrafts(q.questions);
     setClouds(cc.connections);
@@ -167,13 +164,13 @@ export default function AdminLearning() {
   return (
     <main className="shell">
       <Navigation />
-      <div id="page-content" className="learning-admin">
+      <div id="page-content" tabIndex={-1} className="learning-admin">
         <header className="page-intro">
           <span className="eyebrow">LEARNING · 管理工作台</span>
           <h1>把资料，变成可理解的知识。</h1>
           <p>
             识别目录 → 选择小节 → 审核题目与答案 →
-            发布。动态讲解在做到题时生成。
+            发布。动态讲解在交卷答错或主动求助后生成。
           </p>
         </header>
         <p>
@@ -188,7 +185,11 @@ export default function AdminLearning() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </label>
-        <div className="subject-tabs" role="group" aria-label="管理功能">
+        <div
+          className="subject-tabs learning-admin-tabs"
+          role="group"
+          aria-label="管理功能"
+        >
           {[
             ["documents", "资料入库"],
             ["questions", "题目审核"],
@@ -198,6 +199,7 @@ export default function AdminLearning() {
           ].map(([id, name]) => (
             <button
               className={tab === id ? "primary" : "quiet"}
+              aria-pressed={tab === id}
               onClick={() => setTab(id)}
               key={id}
             >
@@ -307,20 +309,32 @@ export default function AdminLearning() {
                   </>
                 )}
                 {task.backend === "api" && task.task !== "essay_lead" && (
-                  <fieldset className="model-scope-fieldset">
+                  <fieldset className="chapter-picker">
                     <legend>
                       {task.task === "essay_reviewer"
                         ? "评审模型（2–5个）"
                         : "任务模型（按选择顺序使用第一个）"}
                     </legend>
-                    <ModelScopeSelector
-                      label="任务预设模型"
-                      models={models}
-                      providers={modelProviders}
-                      selected={task.model_ids}
-                      maxSelected={5}
-                      onChange={(ids) => setTask((current) => current ? { ...current, model_ids: ids } : current)}
-                    />
+                    {models.map((m) => (
+                      <label key={m.id}>
+                        <input
+                          type="checkbox"
+                          checked={task.model_ids.includes(m.id)}
+                          onChange={(e) =>
+                            setTask({
+                              ...task,
+                              model_ids: e.target.checked
+                                ? [...task.model_ids, m.id]
+                                : task.model_ids.filter((id) => id !== m.id),
+                            })
+                          }
+                        />
+                        <span>
+                          {m.name}
+                          <small>{m.model_id}</small>
+                        </span>
+                      </label>
+                    ))}
                   </fieldset>
                 )}
                 {task.task === "essay_lead" && (

@@ -1,4 +1,5 @@
 "use client";
+import { AdaptivePanel } from "../components/AdaptivePanel";
 import { useMemo } from "react";
 import { TimelinePlayer } from "../components/TimelinePlayer";
 import { sentenceTimeline } from "../../lib/learning";
@@ -319,31 +320,36 @@ export default function Assistant() {
       {tab === "chat" && (
         <section className="assistant-grid">
           <aside className="panel glass">
-            <div className="panel-heading">
-              <h2>我的对话</h2>
-              <button
-                className="quiet"
-                onClick={newChat}
-                disabled={busy || !!pending}
-              >
-                新建
-              </button>
-            </div>
-            <div className="history-list">
-              {conversations.map((c) => (
+            <AdaptivePanel
+              title={`对话记录 · ${conversations.length}`}
+              wideAt={1100}
+            >
+              <div className="panel-heading">
+                <h2>我的对话</h2>
                 <button
                   className="quiet"
-                  key={c.id}
-                  aria-pressed={conversation === c.id}
+                  onClick={newChat}
                   disabled={busy || !!pending}
-                  onClick={() =>
-                    loadChat(c.id).catch((e) => setError(e.message))
-                  }
                 >
-                  {c.title}
+                  新建
                 </button>
-              ))}
-            </div>
+              </div>
+              <div className="history-list">
+                {conversations.map((c) => (
+                  <button
+                    className="quiet"
+                    key={c.id}
+                    aria-pressed={conversation === c.id}
+                    disabled={busy || !!pending}
+                    onClick={() =>
+                      loadChat(c.id).catch((e) => setError(e.message))
+                    }
+                  >
+                    {c.title}
+                  </button>
+                ))}
+              </div>
+            </AdaptivePanel>
           </aside>
           <div className="panel glass chat-panel">
             <div className="messages" aria-live="polite">

@@ -2,7 +2,7 @@
 import { MathText } from "../components/MathText";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, requestID, upload } from "../../lib/api";
+import { api, requestID, upload, saveBeforeLeave } from "../../lib/api";
 import {
   subjects,
   hanCount,
@@ -17,6 +17,8 @@ import {
   type ModelOptions,
   type ModelSelection,
 } from "../components/LearningModelPicker";
+import { LearningFigure } from "../components/LearningFigure";
+import { AdaptivePanel } from "../components/AdaptivePanel";
 import { TimelinePlayer } from "../components/TimelinePlayer";
 type Chapter = {
   id: string;
@@ -118,6 +120,8 @@ export default function Practice() {
     [busy, setBusy] = useState(false),
     [seconds, setSeconds] = useState<number | null>(null),
     [saving, setSaving] = useState("");
+  const questionPanel = useRef<HTMLElement>(null),
+    feedbackPanel = useRef<HTMLDivElement>(null);
   const offset = useRef(0),
     draftVersion = useRef(0),
     answersRef = useRef(answers),
@@ -128,6 +132,14 @@ export default function Practice() {
     nextRequest = useRef("");
   answersRef.current = answers;
   attemptRef.current = attempt;
+  useEffect(() => {
+    if (!attempt) return;
+    const panel = attempt.submitted_at
+      ? feedbackPanel.current
+      : questionPanel.current;
+    panel?.scrollIntoView({ block: "start" });
+    panel?.querySelector<HTMLElement>("h2,h3")?.focus({ preventScroll: true });
+  }, [attempt?.id, !!attempt?.submitted_at]);
   function install(a: Attempt) {
     setSubject(a.question.subject_id);
     setKind(a.question.kind);
@@ -287,9 +299,11 @@ export default function Practice() {
         answers: current,
         version: draftVersion.current,
       });
+      if (attemptRef.current?.id !== a.id) return;
       if (current === answersRef.current) dirty.current = false;
       setSaving("已保存");
     } catch (e) {
+      if (attemptRef.current?.id !== a.id) return;
       setSaving((e as Error).message);
     }
   }, []);
@@ -297,6 +311,49 @@ export default function Practice() {
     const timer = setInterval(() => void saveDraft(), 1500);
     return () => clearInterval(timer);
   }, [saveDraft]);
+  useEffect(() => {
+    const flush = () => {
+      const a = attemptRef.current;
+      if (a && !a.submitted_at && dirty.current)
+        saveBeforeLeave(`/learning/attempts/${a.id}/draft`, {
+          answers: answersRef.current,
+          version: draftVersion.current,
+        });
+    };
+    const background = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const navigation = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      if (!(event.target instanceof Element)) return;
+      const link = event.target.closest<HTMLAnchorElement>("a[href]");
+      if (
+        link &&
+        link.target !== "_blank" &&
+        link.origin === window.location.origin &&
+        (link.pathname !== window.location.pathname ||
+          link.search !== window.location.search)
+      )
+        flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", background);
+    document.addEventListener("click", navigation, true);
+    return () => {
+      flush();
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", background);
+      document.removeEventListener("click", navigation, true);
+    };
+  }, []);
   const submit = useCallback(async () => {
     const a = attemptRef.current;
     if (!a || a.submitted_at || submitRef.current) return;
@@ -430,7 +487,7 @@ export default function Practice() {
   return (
     <main className="shell">
       <Navigation />
-      <div id="page-content" className="practice-layout">
+      <div id="page-content" tabIndex={-1} className="practice-layout">
         <header className="page-intro">
           <span className="eyebrow">广东高中 · 专项练习</span>
           <h1>
@@ -609,20 +666,28 @@ export default function Practice() {
               )}
             </section>
             <aside className="panel glass model-setup">
-              <LearningModelPicker
-                options={modelOptions}
-                value={modelSelection}
-                onChange={chooseModels}
-                personal={personal}
-                onPersonal={setPersonal}
-                essay={subject === "chinese" && kind === "essay"}
-                status={modelStatus}
-              />
+              <AdaptivePanel title="模型与身份组">
+                <LearningModelPicker
+                  options={modelOptions}
+                  value={modelSelection}
+                  onChange={chooseModels}
+                  personal={personal}
+                  onPersonal={setPersonal}
+                  essay={subject === "chinese" && kind === "essay"}
+                  status={modelStatus}
+                />
+              </AdaptivePanel>
             </aside>
           </div>
         )}
         {attempt && (
           <>
+            {submitted && (
+              <nav className="review-jumps" aria-label="本题复习">
+                <a href="#practice-feedback">查看作答反馈</a>
+                <a href="#practice-explanation">查看动态讲解</a>
+              </nav>
+            )}
             <div className="practice-context">
               <div>
                 <strong>
@@ -654,7 +719,10 @@ export default function Practice() {
                 submitted ? "practice-session reviewed" : "practice-session"
               }
             >
-              <section className="panel glass question-panel">
+              <section
+                className="panel glass question-panel"
+                ref={questionPanel}
+              >
                 <div className="question-heading">
                   <span className="eyebrow">
                     {submitted ? "练习反馈" : "专注这一题"}
@@ -669,7 +737,7 @@ export default function Practice() {
                     </strong>
                   )}
                 </div>
-                <h2>
+                <h2 tabIndex={-1}>
                   <MathText text={attempt.question.content.text} />
                 </h2>
                 {attempt.question.content.passage && (
@@ -678,10 +746,11 @@ export default function Practice() {
                   </div>
                 )}
                 {attempt.question.assets.map((a) => (
-                  <figure className="question-figure" key={a.id}>
-                    <img src={`/api/v1/learning/assets/${a.id}`} alt={a.alt} />
-                    <figcaption>{a.alt}</figcaption>
-                  </figure>
+                  <LearningFigure
+                    key={a.id}
+                    src={`/api/v1/learning/assets/${a.id}`}
+                    alt={a.alt}
+                  />
                 ))}
                 {essay && !submitted && (
                   <label className="file-button">
@@ -796,8 +865,12 @@ export default function Practice() {
                   </div>
                 ) : (
                   <>
-                    <div className="learning-feedback">
-                      <h3>
+                    <div
+                      className="learning-feedback"
+                      id="practice-feedback"
+                      ref={feedbackPanel}
+                    >
+                      <h3 tabIndex={-1}>
                         {attempt.feedback?.incomplete
                           ? "作文未达到训练字数"
                           : attempt.feedback?.needs_ai
@@ -933,7 +1006,10 @@ export default function Practice() {
                 )}
               </section>
               {submitted && (
-                <section className="panel glass dynamic-panel">
+                <section
+                  className="panel glass dynamic-panel"
+                  id="practice-explanation"
+                >
                   <div className="panel-heading">
                     <h2>一步步，看懂思路。</h2>
                     <span className="access-badge">按需讲解</span>

@@ -1,4 +1,5 @@
 "use client";
+import { LearningFigure } from "./LearningFigure";
 import { MathText } from "./MathText";
 import { useEffect, useState } from "react";
 import { activeSegments, type Timeline } from "../../lib/learning";
@@ -81,10 +82,12 @@ export function TimelinePlayer({
         {assets
           .filter((a) => step.asset_ids.includes(a.id))
           .map((a) => (
-            <figure className="active-figure" key={a.id}>
-              <img src={`/api/v1/learning/assets/${a.id}`} alt={a.alt} />
-              <figcaption>{a.alt}</figcaption>
-            </figure>
+            <LearningFigure
+              active
+              key={a.id}
+              src={`/api/v1/learning/assets/${a.id}`}
+              alt={a.alt}
+            />
           ))}
       </div>
       <div className="timeline-controls">
