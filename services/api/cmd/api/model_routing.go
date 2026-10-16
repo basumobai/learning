@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -102,7 +103,13 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 	if bound > p.Input {
 		return bound, fmt.Errorf("输入超过任务token预算，请缩小处理范围")
 	}
-	if p.Cost == nil {
+	budget, _ := ctx.Value(processingBudgetKey{}).(*processingBudget)
+	if budget != nil {
+		if err := budget.reserveTokens(bound + p.Output); err != nil {
+			return bound, err
+		}
+	}
+	if p.Cost == nil && (budget == nil || budget.Cost == nil) {
 		return bound, nil
 	}
 	if images {
@@ -120,11 +127,17 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 	}
 	a, e1 := strconv.ParseFloat(prices["prompt"], 64)
 	b, e2 := strconv.ParseFloat(prices["completion"], 64)
-	if e1 != nil || e2 != nil || a < 0 || b < 0 {
+	if e1 != nil || e2 != nil || a < 0 || b < 0 || math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) {
 		return bound, fmt.Errorf("模型价格未提供")
 	}
-	if float64(bound)*a+float64(p.Output)*b > *p.Cost {
+	cost := float64(bound)*a + float64(p.Output)*b
+	if p.Cost != nil && cost > *p.Cost {
 		return bound, fmt.Errorf("预计费用超过单次任务预算")
+	}
+	if budget != nil && budget.Cost != nil {
+		if err := budget.reserveCost(cost); err != nil {
+			return bound, err
+		}
 	}
 	return bound, nil
 }
@@ -215,4 +228,36 @@ func (s *server) finishInvocation(ctx context.Context, id string, raw []byte, ca
 		}
 	}
 	_, _ = s.db.ExecContext(ctx, `UPDATE ai_invocations SET status=$2,usage=$3,error_code=$4,finished_at=now() WHERE id=$1`, id, status, nullableJSON(result.Usage), code)
+}
+
+// A conservative reservation includes failed calls and fallbacks. It never
+// promises a verified monetary cap when provider pricing or image billing is unknown.
+type processingBudgetKey struct{}
+type processingBudget struct {
+	sync.Mutex
+	Tokens, Used int
+	Cost         *float64
+	Reserved     float64
+}
+
+func withProcessingBudget(ctx context.Context, tokens int, cost *float64) context.Context {
+	return context.WithValue(ctx, processingBudgetKey{}, &processingBudget{Tokens: tokens, Cost: cost})
+}
+func (b *processingBudget) reserveTokens(n int) error {
+	b.Lock()
+	defer b.Unlock()
+	if b.Used+n > b.Tokens {
+		return fmt.Errorf("累计AI token预留达到任务预算")
+	}
+	b.Used += n
+	return nil
+}
+func (b *processingBudget) reserveCost(n float64) error {
+	b.Lock()
+	defer b.Unlock()
+	if b.Cost != nil && b.Reserved+n > *b.Cost {
+		return fmt.Errorf("累计AI费用预留达到任务预算")
+	}
+	b.Reserved += n
+	return nil
 }

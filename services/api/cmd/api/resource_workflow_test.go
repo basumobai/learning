@@ -129,3 +129,5 @@ func TestResourceScanRecoveryAndControl(t *testing.T) {
 	}
 	admin.call("POST", "/api/v1/admin/resources/scans", map[string]string{"directory": "../"}, 400)
 }
+
+func TestAllRoutesRegisterWithoutAmbiguity(t *testing.T) { _ = (&server{}).routes() }

@@ -108,12 +108,15 @@ func (s *server) documentPDF(ctx context.Context, id, kind string) ([]byte, erro
 }
 func (s *server) resourceRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/admin/resources", s.listResources)
+	m.HandleFunc("GET /api/v1/admin/resources/config", s.resourceConfig)
+	m.HandleFunc("PUT /api/v1/admin/resources/config", s.saveResourceConfig)
+	m.HandleFunc("POST /api/v1/admin/resources/{id}/classify", func(w http.ResponseWriter, r *http.Request) { s.queueResourceTask(w, r, "resource_classify") })
 	m.HandleFunc("POST /api/v1/admin/resources/uploads", s.uploadRawResource)
 	m.HandleFunc("POST /api/v1/admin/resources/scans", s.startResourceScan)
 	m.HandleFunc("GET /api/v1/admin/resources/terms", s.resourceTerms)
 	m.HandleFunc("GET /api/v1/admin/resources/{id}/file", s.originalResource)
 	m.HandleFunc("PATCH /api/v1/admin/resources/{id}/tags", s.editResourceTags)
-	m.HandleFunc("GET /api/v1/admin/resources/jobs/{id}", s.sharedResourceJob)
+	m.HandleFunc("GET /api/v1/admin/resources/jobs/{id}/status", s.sharedResourceJob)
 	m.HandleFunc("POST /api/v1/admin/resources/jobs/{id}/{action}", s.controlResourceJob)
 	m.HandleFunc("GET /api/v1/admin/runtime", s.resourceRuntime)
 }
@@ -183,7 +186,7 @@ func (s *server) listResources(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "resource counts", err)
 		return
 	}
-	respond(w, 200, map[string]any{"resources": resources, "counts": counts, "offset": offset, "limit": 25, "types": resourceTypes, "features": map[string]bool{"light": false, "deep": false, "shares": false}})
+	respond(w, 200, map[string]any{"resources": resources, "counts": counts, "offset": offset, "limit": 25, "types": resourceTypes, "features": map[string]bool{"light": true, "deep": false, "shares": false}})
 }
 
 type resourceTags struct {

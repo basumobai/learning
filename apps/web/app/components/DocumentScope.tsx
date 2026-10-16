@@ -207,7 +207,6 @@ export function DocumentScope({
           disabled={
             busy ||
             pending ||
-            !password ||
             !profile ||
             (!!recognition?.edition_conflict && subject === "english")
           }

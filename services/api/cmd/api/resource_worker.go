@@ -150,6 +150,7 @@ func (s *server) learningWorkers(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case <-timer.C:
+				case <-wake:
 				}
 			}
 		}(queue)
@@ -164,7 +165,6 @@ func (s *server) learningWorkers(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-			case <-wake:
 			}
 		}
 	}()
@@ -277,6 +277,8 @@ func (s *server) runResourceJob(ctx context.Context, kind string, raw []byte) (a
 	switch kind {
 	case "resource_scan":
 		return s.scanResources(ctx, raw)
+	case "resource_classify":
+		return s.classifyResource(ctx, raw)
 	}
 	return nil, fmt.Errorf("该处理策略尚未启用")
 }
