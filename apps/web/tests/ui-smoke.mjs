@@ -19,6 +19,7 @@ let submitted = false,
   round = 0;
 const explanationRequests = [];
 let selectedModels = { model_id: 1, reviewer_ids: [1, 2], lead_model_id: 3 };
+let savedAdminGroup = null;
 const question = {
   id: "q1",
   subject_id: "english",
@@ -226,10 +227,24 @@ await context.route("**/api/v1/**", async (route) => {
             },
           }
         : { training: [] };
-  else if (p === "/admin/config")
+  else if (p === "/admin/groups") {
+    savedAdminGroup = body;
+    data = { id: 1 };
+  } else if (p === "/admin/config")
     data = {
+      encryption_ready: true,
+      providers: [
+        { id: "school", name: "学校模型", enabled: true, base_url: "https://example.com", has_key: true },
+        { id: "voice", name: "语音服务", enabled: true, base_url: "https://example.com", has_key: true },
+      ],
+      groups: [{ id: 1, name: "进阶组", model_ids: [1, 3] }],
+      users: [],
+      audit: [],
       models: [
-        { id: 1, name: "视觉与推理", model_id: "vision-test", kind: "chat" },
+        { id: 1, name: "视觉与推理", model_id: "vision-test", kind: "chat", provider_id: "school", enabled: true, voices: [], json_mode: false, instructions: "" },
+        { id: 2, name: "英语评审", model_id: "essay-test", kind: "chat", provider_id: "school", enabled: true, voices: [], json_mode: false, instructions: "" },
+        { id: 3, name: "合成语音", model_id: "tts-test", kind: "tts", provider_id: "voice", enabled: true, voices: ["clear"], json_mode: false, instructions: "" },
+        { id: 4, name: "旧版停用", model_id: "old-test", kind: "chat", provider_id: "voice", enabled: false, voices: [], json_mode: false, instructions: "" },
       ],
     };
   else if (p === "/admin/learning/tasks")
@@ -413,6 +428,40 @@ assert.equal(
 );
 checks++;
 await noOverflow();
+// Administrators can change a bounded grant scope without losing other categories.
+for (const width of [320, 390, 768, 1024, 1440]) {
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto(base + "/admin#groups");
+  await page.getByRole("heading", { name: "身份组与可用模型" }).waitFor();
+  await page.getByRole("button", { name: /进阶组/ }).click();
+  await noOverflow();
+  checks++;
+}
+await page.getByRole("combobox", { name: "服务商范围" }).selectOption("school");
+await page.getByRole("combobox", { name: "模型类别" }).selectOption("chat");
+await page.getByRole("button", { name: "开启当前范围" }).click();
+assert.equal(await page.getByText("已选 3 个").count(), 1);
+checks++;
+await page.getByRole("combobox", { name: "服务商范围" }).selectOption("voice");
+await page.getByRole("combobox", { name: "模型类别" }).selectOption("tts");
+await page.getByRole("button", { name: "关闭当前范围" }).click();
+assert.equal(await page.getByText("已选 2 个").count(), 1);
+await page.getByRole("button", { name: "开启当前范围" }).click();
+checks++;
+await page.getByRole("combobox", { name: "模型类别" }).selectOption("chat");
+assert.equal(await page.locator(".model-scope-grid input:disabled").count(), 1);
+checks++;
+await page.getByRole("combobox", { name: "模型类别" }).selectOption("all");
+await page.getByRole("checkbox", { name: "仅看已选" }).check();
+assert.equal(await page.locator(".model-scope-item").count(), 1);
+checks++;
+await page.getByRole("checkbox", { name: "仅看已选" }).uncheck();
+await page.locator(".admin-confirm input[type=password]").fill("test-password");
+await page.getByRole("button", { name: "保存身份组" }).click();
+await page.getByText("权限组已保存", { exact: false }).waitFor();
+assert.deepEqual([...savedAdminGroup.model_ids].sort((a, b) => a - b), [1, 2, 3]);
+checks++;
+
 await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
 await page.goto(base);
 await page.locator(".subject-card").first().waitFor();
