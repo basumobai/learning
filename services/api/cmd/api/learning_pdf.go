@@ -121,12 +121,15 @@ func (s *server) extractLearningDocument(w http.ResponseWriter, r *http.Request)
 		fail(w, 400, err.Error())
 		return
 	}
-	var revision int
-	_ = s.db.QueryRowContext(r.Context(), `SELECT revision FROM learning_ai_tasks WHERE task='extract'`).Scan(&revision)
+	var configuration []byte
+	if err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(jsonb_build_object('task',task,'revision',revision,'models',model_ids,'backend',backend,'codex_model',codex_model) ORDER BY task),'[]') FROM learning_ai_tasks WHERE task IN ('extract_questions','extract_answers','match_answers')`).Scan(&configuration); err != nil {
+		s.dbError(w, "extraction configuration", err)
+		return
+	}
 	ids := []string{}
 	for _, chapter := range in.Chapters {
 		raw, _ := json.Marshal(chapter)
-		id, err := s.enqueueLearning(r.Context(), "extract", r.PathValue("id")+":"+security.Digest(string(raw))+":"+strconv.Itoa(revision), map[string]any{"document_id": r.PathValue("id"), "chapters": []chapterSelection{chapter}})
+		id, err := s.enqueueLearning(r.Context(), "extract", r.PathValue("id")+":"+security.Digest(string(raw))+":"+security.Digest(string(configuration)), map[string]any{"document_id": r.PathValue("id"), "chapters": []chapterSelection{chapter}})
 		if err != nil {
 			s.dbError(w, "queue extraction", err)
 			return

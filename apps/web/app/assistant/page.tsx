@@ -513,6 +513,7 @@ export default function Assistant() {
                 <label>
                   训练题型
                   <select
+                    aria-label="训练题型"
                     value={format}
                     onChange={(e) => setFormat(e.target.value)}
                     disabled={busy || !!pending}
@@ -526,6 +527,7 @@ export default function Assistant() {
                 <label>
                   训练重点
                   <select
+                    aria-label="训练重点"
                     value={focus}
                     onChange={(e) => setFocus(e.target.value)}
                     disabled={busy || !!pending}

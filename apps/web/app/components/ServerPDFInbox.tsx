@@ -111,7 +111,7 @@ export function ServerPDFInbox({
           ].map(([key, label]) => (
             <label key={key}>
               {label}
-              <select name={key} required>
+              <select name={key} aria-label={label} required>
                 <option value="">选择文件</option>
                 {files.map((f) => (
                   <option key={f.name} value={f.name} disabled={!f.importable}>

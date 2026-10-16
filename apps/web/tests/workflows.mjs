@@ -37,7 +37,7 @@ try {
     .fill("new-student-password");
   await g.getByLabel("确认密码", { exact: true }).fill("different-password");
   await g.getByRole("button", { name: "创建我的账户" }).click();
-  await g.getByRole("alert").filter({hasText:"两次密码不一致"}).waitFor();
+  await g.getByRole("alert").filter({ hasText: "两次密码不一致" }).waitFor();
   assert.equal(registrations.length, 0);
   checks++;
   await g.getByLabel("确认密码", { exact: true }).fill("new-student-password");
@@ -62,6 +62,38 @@ try {
 
   for (const width of [390, 768, 1440]) {
     const ctx = await browser.newContext({ viewport: { width, height: 1000 } });
+    // Recorder lifecycle uses a deterministic browser stub, not real microphone audio.
+    await ctx.addInitScript(() => {
+      window.__mediaCalls = 0;
+      window.__tracksStopped = 0;
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: {
+          getUserMedia: async () => {
+            window.__mediaCalls++;
+            return {
+              getTracks: () => [{ stop: () => window.__tracksStopped++ }],
+            };
+          },
+        },
+      });
+      window.MediaRecorder = class {
+        state = "inactive";
+        mimeType = "audio/mp4";
+        ondataavailable = null;
+        onstop = null;
+        start() {
+          this.state = "recording";
+        }
+        stop() {
+          this.state = "inactive";
+          this.ondataavailable?.({
+            data: new Blob(["test audio"], { type: this.mimeType }),
+          });
+          this.onstop?.();
+        }
+      };
+    });
     await installMockAPI(ctx);
     const page = await ctx.newPage();
     const errors = [];
@@ -216,6 +248,22 @@ try {
     await page.getByRole("heading", { name: "广东三问五答" }).waitFor();
     assert.equal(generated.format, "guangdong_b");
     assert.equal(generated.focus, "记笔记与信息保持");
+    checks++;
+    await page
+      .getByRole("button", { name: "录制这一项作答", exact: true })
+      .click();
+    await page.getByRole("button", { name: "结束录音", exact: true }).click();
+    await page
+      .getByRole("link", { name: "下载本项录音", exact: true })
+      .waitFor();
+    assert.match(
+      await page
+        .getByRole("link", { name: "下载本项录音", exact: true })
+        .getAttribute("download"),
+      /\.m4a$/,
+    );
+    assert.equal(await page.evaluate(() => window.__mediaCalls), 1);
+    assert.ok((await page.evaluate(() => window.__tracksStopped)) > 0);
     checks++;
     await page.getByLabel("听力笔记", { exact: true }).fill("Fri 3pm");
     await page

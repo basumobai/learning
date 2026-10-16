@@ -60,7 +60,12 @@ export function GuangdongPractice({
     lesson.speaking_feedback || null,
   );
   const [recording, setRecording] = useState(false),
-    [recordings, setRecordings] = useState<Record<number, string>>({});
+    [requestingMic, setRequestingMic] = useState(false),
+    [recordings, setRecordings] = useState<
+      Record<number, { url: string; extension: string }>
+    >({});
+  const active = useRef(true),
+    micPending = useRef(false);
   const recorder = useRef<MediaRecorder | null>(null),
     stream = useRef<MediaStream | null>(null),
     urls = useRef<string[]>([]),
@@ -76,15 +81,16 @@ export function GuangdongPractice({
     );
     return () => clearTimeout(timer);
   }, [seconds]);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
       if (recorder.current?.state === "recording") recorder.current.stop();
       stream.current?.getTracks().forEach((t) => t.stop());
       if (stopTimer.current) clearTimeout(stopTimer.current);
       urls.current.forEach((u) => URL.revokeObjectURL(u));
-    },
-    [],
-  );
+    };
+  }, []);
   function stop() {
     if (stopTimer.current) clearTimeout(stopTimer.current);
     if (recorder.current?.state === "recording") recorder.current.stop();
@@ -92,6 +98,7 @@ export function GuangdongPractice({
     setRecording(false);
   }
   async function record() {
+    if (micPending.current || recorder.current?.state === "recording") return;
     setError("");
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
       setError(
@@ -99,8 +106,14 @@ export function GuangdongPractice({
       );
       return;
     }
+    micPending.current = true;
+    setRequestingMic(true);
     try {
       const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!active.current) {
+        media.getTracks().forEach((t) => t.stop());
+        return;
+      }
       stream.current = media;
       const r = new MediaRecorder(media);
       recorder.current = r;
@@ -110,17 +123,29 @@ export function GuangdongPractice({
         if (e.data.size) chunks.push(e.data);
       };
       r.onstop = () => {
+        media.getTracks().forEach((t) => t.stop());
+        if (stopTimer.current) clearTimeout(stopTimer.current);
+        if (!active.current) return;
         const u = URL.createObjectURL(new Blob(chunks, { type: r.mimeType }));
         urls.current.push(u);
-        setRecordings((v) => ({ ...v, [index]: u }));
-        media.getTracks().forEach((t) => t.stop());
+        const extension = r.mimeType.includes("mp4")
+          ? "m4a"
+          : r.mimeType.includes("ogg")
+            ? "ogg"
+            : "webm";
+        setRecordings((v) => ({ ...v, [index]: { url: u, extension } }));
         setRecording(false);
       };
       r.start();
       setRecording(true);
       stopTimer.current = setTimeout(stop, 180000);
     } catch {
-      setError("未能使用麦克风，请在浏览器设置中允许录音，或改用文字作答。");
+      stream.current?.getTracks().forEach((t) => t.stop());
+      if (active.current)
+        setError("未能使用麦克风，请在浏览器设置中允许录音，或改用文字作答。");
+    } finally {
+      micPending.current = false;
+      if (active.current) setRequestingMic(false);
     }
   }
   async function submit() {
@@ -205,7 +230,7 @@ export function GuangdongPractice({
           <button
             className="quiet"
             key={i}
-            disabled={recording}
+            disabled={recording || requestingMic}
             aria-pressed={step === i}
             onClick={() => {
               speech.stop();
@@ -255,7 +280,7 @@ export function GuangdongPractice({
             <button
               type="button"
               className="quiet"
-              disabled={speech.busy}
+              disabled={speech.busy || requestingMic}
               onClick={() => (recording ? stop() : void record())}
             >
               {recording ? "结束录音" : "录制这一项作答"}
@@ -265,10 +290,10 @@ export function GuangdongPractice({
       )}
       {recordings[step] && (
         <div>
-          <audio controls src={recordings[step]} />
+          <audio controls src={recordings[step].url} />
           <a
-            href={recordings[step]}
-            download={`learning-speaking-${step + 1}.webm`}
+            href={recordings[step].url}
+            download={`learning-speaking-${step + 1}.${recordings[step].extension}`}
           >
             下载本项录音
           </a>
@@ -306,7 +331,7 @@ export function GuangdongPractice({
       {!lesson.submitted ? (
         <button
           className="primary"
-          disabled={busy || recording}
+          disabled={busy || recording || requestingMic}
           onClick={() => void submit()}
         >
           {busy ? "正在提交…" : "提交本组作答，核对参考表达"}
