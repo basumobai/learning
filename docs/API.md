@@ -62,3 +62,29 @@ mode 为 scheduled/practice；types 可含 recognition/meaning_recall/spelling/l
 句子 text 最多 4000 字符；听力主题最多 200，level 为 A2/B1/B2；聊天单条最多 12000；语音最多 4000。这些以及请求/响应字节边界用于安全及供应商格式兼容，没有调用次数或对话轮数额度。聊天不发送客户端自选 system/tool 角色或模型 fallback。训练字段与连续原文依据必须校验通过，否则 502。
 
 request_id 为 8–128 位字母/数字/下划线/连字符。AI 同一编号相同 payload 返回已缓存结果，不同 payload 冲突；同一对话已有运行请求时返回 409。崩溃预留三分钟后可重试。所有正文只允许一个 JSON 值和已定义字段，未知字段拒绝。401 未登录/会话失效，403 未授权/CSRF/需改密，404 不存在或非本人，502 供应商/生成结构错误。供应商原始错误和密钥不回显。
+
+## Learning 多学科 API
+
+完整行为见 [LEARNING](LEARNING.md)。沿用登录Cookie、CSRF与管理员角色校验。
+
+| 路径（均以 `/api/v1` 开头） | 用途 |
+| --- | --- |
+| GET `/learning/catalog` | 六科、广东题型、教材/学期/章节与已发布题数 |
+| POST `/learning/attempts` | 按科目、题型、多章节范围开始练习 |
+| GET `/learning/attempts/{id}` | 本人练习、截止时间、草稿和交卷后反馈 |
+| POST `/learning/attempts/{id}/draft`、`/submit` | 截止前保存；交卷原子写入作答及主观评分任务 |
+| POST `/learning/attempts/{id}/explanation`、`/chat` | 题目到达后排队讲解；交卷后按步骤追问 |
+| GET `/learning/jobs/{id}`、POST `/learning/jobs/{id}/retry` | 本人后台任务状态及失败重试 |
+| GET `/learning/assets/{id}` | 本人已开始练习的已发布题插图；管理员可预览草稿 |
+| GET/POST `/learning/ai-settings` | 本人API接口配置；Key不返回 |
+| POST `/learning/text-import` | multipart `file`，读取UTF-8 TXT／DOCX作文正文 |
+| POST `/learning/words/next`、`/learning/words/{id}/answer` | 4选1限时轮次，服务端判断截止 |
+| GET/POST `/admin/learning/tasks` | 提示词、任务模型、作文主审、API/Codex后端 |
+| GET/POST `/admin/learning/documents` | 资料列表／multipart题目与答案PDF上传 |
+| POST `/admin/learning/documents/{id}/extract` | 核对页码后为每个选中小节独立排队 |
+| GET `/admin/learning/documents/{id}/pages/{kind}/{page}` | question/answer物理页图 |
+| GET `/admin/learning/questions`、POST `/admin/learning/questions/{id}` | 审核草稿、修订、发布，使用revision乐观锁 |
+| GET/POST `/admin/learning/word-sets`、POST `/admin/learning/word-sets/{id}/approve` | 准备、审核与撤回限时选项集 |
+| GET/POST `/admin/learning/cloud`、POST `/admin/learning/cloud/list`、`/import` | 管理员WebDAV配置、列目录、成对读取PDF |
+
+`normal/hard/despair` 为难度；`en_zh/zh_en` 为方向。`request_id`用于开始练习、开始词汇轮次和AI追问的幂等；作答提交/词汇选择由服务端锁定第一次有效提交。不同内容不能通过重放覆盖首次结果。新增练习题组用 `content.parts` 保存小题，`solution.answers` 按小题ID映射，选择题答案为选项ID，多选以逗号分隔。

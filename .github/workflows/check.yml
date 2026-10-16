@@ -27,11 +27,13 @@ jobs:
           cache-dependency-path: services/api/go.sum
       - run: go mod download && go mod verify
         working-directory: services/api
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - name: Unit, migration and concurrent database integration tests
         run: go test -race -count=1 -v ./...
         working-directory: services/api
         env:
           TEST_DATABASE_URL: postgres://els:els_ci_only@127.0.0.1:5432/els_test?sslmode=disable
+      - run: python3 -m unittest discover -s services/codex-runner -p 'test_*.py' -v
       - run: go vet ./... && go build ./cmd/api
         working-directory: services/api
   web:
@@ -49,6 +51,19 @@ jobs:
         working-directory: apps/web
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Browser checks of Learning flows (mock API)
+        working-directory: apps/web
+        run: |
+          npm start -- --port 3007 >/tmp/learning-web.log 2>&1 &
+          WEB_PID=$!
+          trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --silent --fail http://127.0.0.1:3007 >/dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:ui
   integration:
     env:
       ELS_ADMIN_USERNAME: admin

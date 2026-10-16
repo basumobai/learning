@@ -97,6 +97,9 @@ export default function Vocabulary() {
               <div>
                 <h2 lang="en">
                   {entry.word} <small>{entry.phonetic}</small>
+                  {auth.user?.role === "admin" && (
+                    <small> · 词义 #{entry.id}</small>
+                  )}
                 </h2>
                 <p>
                   {entry.pos} · {entry.chinese}

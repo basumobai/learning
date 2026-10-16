@@ -132,6 +132,11 @@ export default function Admin() {
   return (
     <main className="shell">
       <Navigation />
+      <p className="section-links">
+        <a href="/admin/learning">
+          多学科题库、PDF 与云盘入库、AI 提示词及极速四选一 →
+        </a>
+      </p>
       <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">CONTENT · MODELS · ACCESS</span>
         <h1>把合适的资源，交给合适的人。</h1>

@@ -94,3 +94,16 @@ export async function speechBlob(path: string, body: object): Promise<Blob> {
 export function requestID(): string {
   return crypto.randomUUID();
 }
+
+export async function upload<T>(path: string, body: FormData): Promise<T> {
+  if (!csrf) await authState();
+  const response = await fetch(`/api/v1${path}`, {
+    method: "POST",
+    headers: { "X-ELS-Client": "web", "X-CSRF-Token": csrf },
+    body,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok)
+    throw new APIError(data.error || "上传失败", response.status);
+  return data as T;
+}

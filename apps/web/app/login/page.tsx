@@ -35,13 +35,13 @@ export default function Login() {
   }
   return (
     <main className="shell login-shell">
-      <section className="login-story" aria-label="关于 ELS">
+      <section className="login-story" aria-label="关于 Learning">
         <div className="brand">
           <span className="mark">
             <Icon name="book" />
           </span>
           <span>
-            ELS<span className="brand-detail">英语助学</span>
+            Learning<span className="brand-detail">学习平台</span>
           </span>
         </div>
         <span className="eyebrow">A LITTLE EVERY DAY</span>

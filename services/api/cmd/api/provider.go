@@ -157,7 +157,7 @@ func (s *server) upstream(ctx context.Context, m aiModel, path string, body any,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+m.key)
 	req.Header.Set("HTTP-Referer", s.origin)
-	req.Header.Set("X-Title", "ELS AI English Learning")
+	req.Header.Set("X-Title", "Learning Study Platform")
 	client := s.client
 	if client == nil {
 		client = newProviderClient()

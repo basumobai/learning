@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "ELS · 英语助学",
-  description: "英语词汇、长句与听力的 AI 助学平台",
+  title: "Learning · 广东高中学习平台",
+  description: "面向广东高中的语文、数学、英语、物理、化学、生物 AI 学习平台",
 };
 
 export const viewport: Viewport = {

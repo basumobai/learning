@@ -55,13 +55,17 @@ func main() {
 	if err := s.bootstrap(context.Background()); err != nil {
 		log.Fatal(err)
 	}
+	if err := s.initLearning(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+	s.learningWorkers(context.Background())
 	mux := s.routes()
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
-	log.Printf("ELS API listening on %s", addr)
-	log.Fatal((&http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 130 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 * 1024}).ListenAndServe())
+	log.Printf("Learning API listening on %s", addr)
+	log.Fatal((&http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 120 * time.Second, WriteTimeout: 180 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 * 1024}).ListenAndServe())
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -165,6 +169,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/review", s.review)
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/undo", s.undo)
 	s.extraRoutes(mux)
+	s.learningRoutes(mux)
 	return s.protect(mux)
 }
 func (s *server) dbError(w http.ResponseWriter, action string, err error) {

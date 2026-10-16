@@ -65,7 +65,7 @@ export function Navigation() {
   const path = usePathname();
   const router = useRouter();
   const items: { href: string; label: string; icon: IconName }[] = [
-    { href: "/", label: "今日学习", icon: "book" },
+    { href: "/", label: "学习", icon: "book" },
     { href: "/assistant", label: "AI 助学", icon: "sparkles" },
     { href: "/vocabulary", label: "词库", icon: "library" },
     { href: "/settings", label: "设置", icon: "settings" },
@@ -92,7 +92,7 @@ export function Navigation() {
           <Icon name="book" />
         </span>
         <span>
-          ELS<span className="brand-detail">英语助学</span>
+          Learning<span className="brand-detail">学习平台</span>
         </span>
       </Link>
       <nav aria-label="主要导航">

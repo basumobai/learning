@@ -1,4 +1,7 @@
 "use client";
+import { useMemo } from "react";
+import { TimelinePlayer } from "../components/TimelinePlayer";
+import { sentenceTimeline } from "../../lib/learning";
 import { useEffect, useRef, useState } from "react";
 import { api, requestID } from "../../lib/api";
 import { parsePendingAI, type PendingAI } from "../../lib/ai-state";
@@ -255,6 +258,17 @@ export default function Assistant() {
   }
   if (!auth.allowed) return <Loading />;
   const analysis = lesson?.kind === "sentence" ? lesson.data?.analysis : null;
+  const dynamicSentence = useMemo(
+    () =>
+      analysis && lesson?.data
+        ? sentenceTimeline(
+            lesson.data.text,
+            analysis.chunks,
+            analysis.main_clause,
+          )
+        : null,
+    [analysis, lesson?.data],
+  );
   return (
     <main className="shell">
       <Navigation />
@@ -454,6 +468,12 @@ export default function Assistant() {
                   </p>
                 )}
               </div>
+              {showCheck && dynamicSentence && (
+                <div>
+                  <h3>答错或没理解？跟着标注重新看。</h3>
+                  <TimelinePlayer timeline={dynamicSentence} />
+                </div>
+              )}
               <p className="setting-note">
                 AI 生成的讲解，遇到疑点可以复制到辅导对话继续核对。
               </p>
