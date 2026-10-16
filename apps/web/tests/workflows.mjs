@@ -294,14 +294,48 @@ try {
   const ctx = await browser.newContext();
   await installMockAPI(ctx);
   let unavailable = true;
-  await ctx.route("**/api/v1/auth/me", (route) =>
-    unavailable
+  let probes = 0;
+  await ctx.route("**/api/v1/auth/me", (route) => {
+    probes++;
+    return unavailable
       ? route.fulfill({ status: 503, json: { error: "学习服务暂时不可用" } })
-      : route.fallback(),
-  );
+      : route.fallback();
+  });
   const p = await ctx.newPage();
+  await p.clock.install();
   await p.goto(base);
   await p.getByRole("heading", { name: "暂时无法连接学习服务" }).waitFor();
+  unavailable = false;
+  await p.clock.fastForward(15_000);
+  await p.locator(".subject-card").first().waitFor();
+  checks++;
+  unavailable = true;
+  probes = 0;
+  await p.reload();
+  await p.getByRole("heading", { name: "暂时无法连接学习服务" }).waitFor();
+  for (const delay of [15_000, 30_000, 60_000]) {
+    const response = p.waitForResponse((r) =>
+      r.url().endsWith("/api/v1/auth/me"),
+    );
+    await p.clock.fastForward(delay);
+    await (await response).finished();
+    // Allow the failed fetch and React effect cleanup to finish before advancing time.
+    await p.waitForTimeout(100);
+  }
+  assert.equal(probes, 4);
+  await p.clock.fastForward(300_000);
+  await p.waitForTimeout(100);
+  assert.equal(
+    probes,
+    4,
+    "automatic retries must stop after the finite budget",
+  );
+  assert.equal(
+    new URL(p.url()).pathname,
+    "/",
+    "outage must not redirect to login",
+  );
+  checks++;
   unavailable = false;
   await p.getByRole("button", { name: "重新连接", exact: true }).click();
   await p.locator(".subject-card").first().waitFor();
