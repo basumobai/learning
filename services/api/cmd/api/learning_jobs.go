@@ -97,7 +97,7 @@ func (s *server) retryLearningJob(w http.ResponseWriter, r *http.Request) {
 		raw, _ = json.Marshal(p)
 	}
 
-	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_jobs SET status='queued',error='',payload=$3,updated_at=now() WHERE id=$1 AND owner_id=$2 AND status='failed'`, r.PathValue("id"), userID(r.Context()), string(raw))
+	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_jobs SET status='queued',error='',payload=$3,updated_at=now(),retry_at=now(),lease_until=NULL,lease_owner=NULL,pause_requested=false,cancel_requested=false WHERE id=$1 AND owner_id=$2 AND status='failed'`, r.PathValue("id"), userID(r.Context()), string(raw))
 	if err != nil {
 		s.dbError(w, "retry job", err)
 		return

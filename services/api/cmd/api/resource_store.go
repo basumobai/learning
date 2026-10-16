@@ -186,7 +186,7 @@ func (s *server) listResources(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "resource counts", err)
 		return
 	}
-	respond(w, 200, map[string]any{"resources": resources, "counts": counts, "offset": offset, "limit": 25, "types": resourceTypes, "features": map[string]bool{"light": true, "deep": false, "shares": false}})
+	respond(w, 200, map[string]any{"resources": resources, "counts": counts, "offset": offset, "limit": 25, "types": resourceTypes, "features": map[string]bool{"light": true, "deep": false, "shares": true}})
 }
 
 type resourceTags struct {

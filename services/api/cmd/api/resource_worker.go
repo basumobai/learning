@@ -274,7 +274,19 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 	return saveErr
 }
 func (s *server) runResourceJob(ctx context.Context, kind string, raw []byte) (any, error) {
+	var p struct {
+		Share    string `json:"share_id"`
+		Import   string `json:"import_id"`
+		Snapshot int    `json:"snapshot"`
+	}
+	_ = json.Unmarshal(raw, &p)
 	switch kind {
+	case "share_inspect":
+		return s.inspectShareJob(ctx, p.Share)
+	case "share_analyze":
+		return s.analyzeShareJob(ctx, p.Share, p.Snapshot)
+	case "share_download":
+		return s.downloadShareJob(ctx, p.Import)
 	case "resource_scan":
 		return s.scanResources(ctx, raw)
 	case "resource_classify":

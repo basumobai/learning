@@ -53,3 +53,20 @@ P1 CI with PostgreSQL 17, race tests, browser mocks and complete Compose passed:
 - 配置支持版本冲突检测、抽样/OCR/token/时间/费用/重试预算。累计预留包含失败与降级调用；未知费用不会冒充可验证美元上限。
 - 新测试覆盖代表页上限、正文覆盖错误文件名、英语混合专题、物理专题、引用造假、累计预算、缓存及未触发全文准备。
 - 本地Go测试及Next生产构建通过；P3远程发现的Go ServeMux路径冲突和旧分类界面禁用条件已修复，新增无数据库路由注册测试防回归。
+
+## P5：选择性网盘导入
+
+- 复用learning_cloud_connections的加密凭据，新增OpenList适配类型，保留WebDAV兼容。
+- 夸克/百度链接识别、目录快照、元数据AI预筛选、显式文件批准、大小/版本/hash核验、流量预留/限速、任务控制及原件进入A区已实现。
+- 原生任意分享链接解析**未实现**。当前需管理员在合法授权的OpenList实例完成分享挂载，再指定目录；百度分享插件仍属测试版本，不宣称兼容所有分享。无Cookie、API Key或提取码进入AI输入。
+- 下载默认仅允许同源代理，其他下载主机需显式白名单；安全HTTP传输拒绝内网与重定向；响应中的HTML header不作为HTTP凭据转发。
+- 新测试使用受控OpenList响应，验证仅取已选PDF、快照冲突、越界/SSRF、保密和导入A区；未使用真实网盘账号，真实授权及驱动兼容待验收。
+- P4远程浏览器和完整Compose通过；遗留交互任务重试时间与安装器四服务假设已修正为立即重试及五服务验收。
+
+### OpenList核查来源（2026-10-16）
+
+- 官方API说明：https://doc.oplist.org/api/apidocs
+- 目录/文件接口实际源码：https://github.com/OpenListTeam/OpenList/blob/main/server/handles/fsread.go
+- 百度授权：https://doc.oplist.org/guide/drivers/baidu
+- 夸克授权：https://doc.oplist.org/guide/drivers/quark
+- 百度分享测试插件：https://github.com/OpenListTeam/openlist-baidushare-plugin

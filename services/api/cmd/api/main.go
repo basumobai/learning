@@ -224,6 +224,7 @@ func (s *server) routes() http.Handler {
 	s.extraRoutes(mux)
 	s.modelCatalogRoutes(mux)
 	s.resourceRoutes(mux)
+	s.shareRoutes(mux)
 	s.learningRoutes(mux)
 	return s.protect(mux)
 }
