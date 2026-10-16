@@ -107,3 +107,22 @@ export async function upload<T>(path: string, body: FormData): Promise<T> {
     throw new APIError(data.error || "上传失败", response.status);
   return data as T;
 }
+
+// Best effort flush on navigation/backgrounding. Never put CSRF or answers in a URL.
+export function saveBeforeLeave(path: string, body: object): boolean {
+  if (!csrf) return false;
+  const raw = JSON.stringify(body);
+  // Browsers impose a shared 64 KiB keepalive limit; ordinary autosave handles larger drafts.
+  if (new TextEncoder().encode(raw).byteLength > 60000) return false;
+  void fetch(`/api/v1${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-ELS-Client": "web",
+      "X-CSRF-Token": csrf,
+    },
+    body: raw,
+    keepalive: true,
+  }).catch(() => {});
+  return true;
+}

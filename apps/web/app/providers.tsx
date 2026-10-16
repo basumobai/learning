@@ -10,6 +10,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, authState, setCSRF, type User } from "../lib/api";
 import { Icon, type IconName } from "./icons";
+import { ViewportFrame } from "./components/ViewportFrame";
 
 const AuthContext = createContext<{
   user: User | null;
@@ -33,6 +34,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, [refresh]);
   return (
     <AuthContext.Provider value={{ user, ready, refresh }}>
+      <ViewportFrame />
       {children}
     </AuthContext.Provider>
   );
@@ -64,15 +66,29 @@ export function Navigation() {
   const { user } = useAuth();
   const path = usePathname();
   const router = useRouter();
-  const items: { href: string; label: string; icon: IconName }[] = [
-    { href: "/", label: "学习", icon: "book" },
-    { href: "/assistant", label: "AI 助学", icon: "sparkles" },
-    { href: "/vocabulary", label: "词库", icon: "library" },
-    { href: "/settings", label: "设置", icon: "settings" },
-    ...(user?.role === "admin"
-      ? [{ href: "/admin", label: "管理", icon: "shield" as const }]
-      : []),
-  ];
+  const items: { href: string; label: string; icon: IconName }[] =
+    user?.must_change_password
+      ? [{ href: "/settings", label: "设置", icon: "settings" }]
+      : [
+          { href: "/", label: "学习", icon: "book" },
+          { href: "/assistant", label: "AI 助学", icon: "sparkles" },
+          { href: "/vocabulary", label: "词库", icon: "library" },
+          { href: "/settings", label: "设置", icon: "settings" },
+          ...(user?.role === "admin"
+            ? [{ href: "/admin", label: "管理", icon: "shield" as const }]
+            : []),
+        ];
+  const activeHref =
+    path === "/" ||
+    ["/english", "/practice", "/challenge"].some(
+      (p) => path === p || path.startsWith(p + "/"),
+    )
+      ? "/"
+      : items.find(
+          (item) =>
+            item.href !== "/" &&
+            (path === item.href || path.startsWith(item.href + "/")),
+        )?.href;
   async function logout() {
     try {
       await api("/auth/logout", {});
@@ -87,7 +103,10 @@ export function Navigation() {
       <a className="skip-link" href="#page-content">
         跳到页面内容
       </a>
-      <Link className="brand" href="/">
+      <Link
+        className="brand"
+        href={user?.must_change_password ? "/settings" : "/"}
+      >
         <span className="mark">
           <Icon name="book" />
         </span>
@@ -100,7 +119,7 @@ export function Navigation() {
           <Link
             key={href}
             href={href}
-            aria-current={path === href ? "page" : undefined}
+            aria-current={activeHref === href ? "page" : undefined}
           >
             <Icon name={icon} />
             <span>{label}</span>

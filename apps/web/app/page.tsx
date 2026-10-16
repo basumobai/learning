@@ -25,7 +25,7 @@ export default function LearningHome() {
   return (
     <main className="shell">
       <Navigation />
-      <div id="page-content" className="learning-home">
+      <div id="page-content" tabIndex={-1} className="learning-home">
         <header className="learning-hero">
           <span className="eyebrow">LEARNING · 广东高中</span>
           <h1>
