@@ -104,6 +104,12 @@ exit 0
         self.run_install('--origin','https://wrong.test',ok=False)
         self.assertEqual(snapshot,self.config())
 
+    def test_invalid_origin_is_rejected_before_writing_secrets(self):
+        for origin in ('https://example.test/path','http://public.test','https://user:pass@example.test','https://good.test\nPOSTGRES_PASSWORD=bad','https://[bad'):
+            with self.subTest(origin=origin):
+                self.run_install('--config-only','--origin',origin,ok=False)
+                self.assertFalse((self.root/'.env').exists())
+
     def test_repeat_install_with_data_keeps_secrets(self):
         self.run_install('--config-only')
         snapshot=self.config()

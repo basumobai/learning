@@ -46,7 +46,13 @@ export async function authState(): Promise<{ user: User; csrf_token: string }> {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     csrf = "";
-    throw new APIError(data.error || (response.status === 401 ? "请先登录" : "学习服务暂时不可用，请稍后重试。"), response.status);
+    throw new APIError(
+      data.error ||
+        (response.status === 401
+          ? "请先登录"
+          : "学习服务暂时不可用，请稍后重试。"),
+      response.status,
+    );
   }
   csrf = data.csrf_token;
   return data;
@@ -67,14 +73,19 @@ export async function api<T>(path: string, body?: object): Promise<T> {
     body
       ? {
           method: "POST",
-          headers: await headers(!["/auth/login", "/auth/register"].includes(path)),
+          headers: await headers(
+            !["/auth/login", "/auth/register"].includes(path),
+          ),
           body: JSON.stringify(body),
         }
       : { cache: "no-store" },
   );
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401 && !["/auth/login", "/auth/register"].includes(path)) {
+    if (
+      response.status === 401 &&
+      !["/auth/login", "/auth/register"].includes(path)
+    ) {
       csrf = "";
       if (
         typeof window !== "undefined" &&

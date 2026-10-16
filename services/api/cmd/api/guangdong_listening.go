@@ -159,6 +159,10 @@ func (s *server) speakingFeedback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if _, err = s.allowedModel(r.Context(), in.ModelID, "chat"); err != nil {
+		fail(w, 403, "模型授权已更新，请重新选择后评价")
+		return
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		s.dbError(w, "speaking feedback", err)

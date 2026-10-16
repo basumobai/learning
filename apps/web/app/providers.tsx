@@ -38,7 +38,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, ready, refresh }}>
       <ViewportFrame />
-      {error ? <main className="shell"><section className="panel glass" role="alert"><h1>暂时无法连接学习服务</h1><p>{error}</p><button className="primary" onClick={() => void refresh()}>重新连接</button></section></main> : children}
+      {error ? (
+        <main className="shell">
+          <section className="panel glass" role="alert">
+            <h1>暂时无法连接学习服务</h1>
+            <p>{error}</p>
+            <button className="primary" onClick={() => void refresh()}>
+              重新连接
+            </button>
+          </section>
+        </main>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   );
 }
@@ -133,7 +145,12 @@ export function Navigation() {
         <span className="account-avatar" aria-hidden="true">
           {user?.display_name?.slice(0, 1) || "E"}
         </span>
-        <Link href="/settings#security" className="account-name" title="账户与密码设置" aria-label="账户与密码设置">
+        <Link
+          href="/settings#security"
+          className="account-name"
+          title="账户与密码设置"
+          aria-label="账户与密码设置"
+        >
           {user?.display_name}
         </Link>
         <button

@@ -148,6 +148,26 @@ func TestServerPDFDirectoryConfinement(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistrationPolicyAndDefaultGroup(t *testing.T) {
+	s, learner, _ := learningTestServer(t)
+	learner.call("POST", "/api/v1/admin/registration", map[string]any{"registration_open": false, "default_group_id": 1, "admin_password": "student-testing-password"}, 403)
+	token := security.Token(32)
+	s.db.Exec(`INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES($1,'teacher',now()+interval '1 day')`, security.Digest(token))
+	admin := &apiTester{t: t, handler: s.routes(), token: token, csrf: security.CSRF(token)}
+	var group int64
+	if err := s.db.QueryRow(`INSERT INTO permission_groups(name) VALUES('新用户组') RETURNING id`).Scan(&group); err != nil {
+		t.Fatal(err)
+	}
+	admin.call("POST", "/api/v1/admin/registration", map[string]any{"registration_open": true, "default_group_id": group, "admin_password": "learning-test-password"}, 200)
+	guest := &apiTester{t: t, handler: s.routes()}
+	guest.call("POST", "/api/v1/auth/register", map[string]string{"username": "group-student", "display_name": "新用户", "password": "new-disposable-password"}, 201)
+	var got int64
+	var role string
+	if err := s.db.QueryRow(`SELECT group_id,role FROM users WHERE username='group-student'`).Scan(&got, &role); err != nil || got != group || role != "learner" {
+		t.Fatal(got, role, err)
+	}
+}
 func TestAdditiveUpgradePreservesAccountsAndEncryptedKeys(t *testing.T) {
 	s, _, _ := learningTestServer(t)
 	ctx := context.Background()

@@ -107,6 +107,34 @@ func TestSpeakingSubmissionIsolationAndReplay(t *testing.T) {
 	if len(data["reference_tasks"]) == 0 {
 		t.Fatal("submitted references missing")
 	}
+	model := learningTestModel(t, s, "speaking-model")
+	calls := 0
+	s.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		items := []map[string]any{}
+		for i := 0; i < 8; i++ {
+			items = append(items, map[string]any{"index": i, "assessment": "补全时间信息", "suggestion": "At three on Friday."})
+		}
+		text, _ := json.Marshal(map[string]any{"items": items, "summary": "先听清时间"})
+		out, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(text)}, "finish_reason": "stop"}}})
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(out))}, nil
+	})}
+	feedback := map[string]any{"model_id": model, "request_id": "speaking-feedback-1"}
+	a.call("POST", "/api/v1/ai/training/speaking/feedback", feedback, 200)
+	a.call("POST", "/api/v1/ai/training/speaking/feedback", feedback, 200)
+	if calls != 1 {
+		t.Fatal("feedback retry billed the model twice", calls)
+	}
+	data = a.call("GET", "/api/v1/ai/training/speaking", nil, 200)
+	if len(data["speaking_feedback"]) == 0 {
+		t.Fatal("saved feedback missing")
+	}
+	s.db.Exec(`DELETE FROM group_models WHERE model_id=$1`, model)
+	feedback["request_id"] = "speaking-feedback-2"
+	a.call("POST", "/api/v1/ai/training/speaking/feedback", feedback, 403)
+	if calls != 1 {
+		t.Fatal("revoked model was called")
+	}
 }
 func TestOCRIsIndependentAndRetainsPageProgress(t *testing.T) {
 	s, _, _ := learningTestServer(t)

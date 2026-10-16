@@ -12,13 +12,16 @@ func (s *server) extractChapterStages(ctx context.Context, qparts, aparts []map[
 	run := func(task, contract string, parts []map[string]any, out any) error {
 		models, _, err := s.taskModels(ctx, task, false)
 		if err != nil {
-			return err
+			return fmt.Errorf("%s：%w", learningDefaults[task].Name, err)
 		}
 		text, err := s.learningCompletion(ctx, models[0], s.taskPrompt(ctx, task)+contract, parts)
 		if err != nil {
 			return err
 		}
-		return platform.Decode(text, out)
+		if err = platform.Decode(text, out); err != nil {
+			return fmt.Errorf("%s：%w", learningDefaults[task].Name, err)
+		}
+		return nil
 	}
 	var qs struct {
 		Questions []extractedQuestion `json:"questions"`

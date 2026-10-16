@@ -8,7 +8,7 @@
 
 ## 🚀 三步启动
 
-准备 **Docker Engine + Docker Compose v2**，并安装 **Git、OpenSSL、curl**。可参考 [Docker 官方安装说明](https://docs.docker.com/engine/install/)；无需在主机单独安装 Go、Node 或 PostgreSQL。
+准备 **Docker Engine + Docker Compose v2**，并安装 **Git、Python 3、OpenSSL、curl**。可参考 [Docker 官方安装说明](https://docs.docker.com/engine/install/)；无需在主机单独安装 Go、Node 或 PostgreSQL。
 
 ```bash
 git clone https://github.com/basumobai/learning.git
@@ -20,6 +20,14 @@ bash scripts/install.sh
 
 首次运行会自动生成 `.env` 中的数据库密码、管理员初始密码与 32 字节加密密钥，构建并启动容器，检查 Web/API 是否就绪。**请保存终端首次显示的管理员密码**，首次登录后建议立即修改。已存在的 `.env` 与数据卷不会被安装器重置。
 
+正式域名和自定义端口可在首次安装时一并指定：
+
+```bash
+WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai.com
+```
+
+已有部署只编辑 `.env` 中对应域名/端口，保留密码与加密密钥。安装器先检查旧卷，再用配置密码实际连接数据库；**旧卷存在但 `.env` 丢失时停止并要求恢复原配置，不生成替代密钥**。Web 等API健康后启动。
+
 本机打开 `http://localhost:<WEB_PORT>`，使用 `admin` 和首次生成的密码登录。
 
 > **VPS 默认只在本机监听端口，不会直接公网开放。** 若通过自己的电脑访问 VPS，可运行 `ssh -L <WEB_PORT>:127.0.0.1:<WEB_PORT> 用户名@服务器地址`，再在本机浏览器打开 `http://localhost:<WEB_PORT>`。正式使用域名时，在 HTTPS 反向代理前端转发到服务器 `127.0.0.1:<WEB_PORT>`，并将 `.env` 里的 `APP_ORIGIN` 改成实际的 `https://...` 站点源地址。
@@ -27,8 +35,12 @@ bash scripts/install.sh
 ### 安装后做什么
 
 1. 进入 **管理 → 服务商与模型**，配置 OpenRouter 等服务商的 API Key，添加所需聊天/TTS 模型。
-2. 在 **身份组** 中批量选择、授权模型，再到 **账户** 创建学生账号。
+2. 在 **身份组** 中授权模型，在 **管理 → 账户 → 自主注册** 选择新用户默认身份组。用户从登录页自行注册，也可关闭注册并由管理员创建。
 3. 进入 **多学科管理** `/admin/learning`，配置 AI 任务模型、导入并审核题库；或在管理页导入英语词库（单词、音标、词性、中文）。
+
+自己的密码在 **设置 → 密码与登录安全**，也可点击顶部姓名直达；管理员重置他人密码在 **管理 → 账户**。
+
+服务器 PDF 放在部署目录的 **`data/pdf/`**，本次部署即 `/www/wwwroot/learning/learning/data/pdf/`。进入 **多学科管理 → 资料入库 → 从服务器目录导入PDF** 刷新并选择题目、答案。扫描页OCR、目录、题干、答案与配对分别配置模型，可查看逐页文字。详见 [PDF/OCR与听说流程](docs/IMPORT_AND_LISTENING.md)。
 
 ## 常用运维命令
 
@@ -40,7 +52,8 @@ bash scripts/install.sh
 | 查看最新日志 | `docker compose logs --tail=100` |
 | 持续查看日志 | `docker compose logs -f --tail=100` |
 | 重启 | `docker compose restart` |
-| 拉取代码后更新 | `git pull --ff-only && docker compose up --build -d` |
+| 拉取代码后更新 | `git pull --ff-only && bash scripts/install.sh --update` |
+| 修复配置后恢复 | `bash scripts/install.sh --recover` |
 | 停止（保留数据库） | `docker compose down` |
 | 只生成配置，不启动 | `bash scripts/install.sh --config-only` |
 
@@ -56,6 +69,8 @@ bash scripts/install.sh
 | 词汇复习 | `/english` |
 | 限时四选一 | `/challenge` |
 | AI 助学 / 句子拆解 / 听力 | `/assistant` |
+| 广东听说 A朗读 / B三问五答 / C复述 | `/assistant#listening` |
+| 自主注册 / 自己的密码 | `/register` / `/settings#security` |
 | 服务商、模型、身份组与用户 | `/admin` |
 | PDF 题库与多学科配置 | `/admin/learning` |
 

@@ -18,6 +18,14 @@ type taskDefault struct {
 	Prompt string `json:"prompt"`
 }
 
+func isPDFTask(task string) bool {
+	switch task {
+	case "outline", "extract", "ocr", "extract_questions", "extract_answers", "match_answers":
+		return true
+	}
+	return false
+}
+
 var learningDefaults = map[string]taskDefault{
 	"tutor":             {"通用助学", tutorPrompt},
 	"sentence":          {"句子拆解", sentencePrompt},
@@ -55,7 +63,7 @@ func (s *server) initLearning(ctx context.Context) error {
 				legacy = "extract"
 			}
 			if legacy != "" {
-				if _, err = s.db.ExecContext(ctx, `UPDATE learning_ai_tasks SET model_ids=(SELECT model_ids FROM learning_ai_tasks WHERE task=$2) WHERE task=$1 AND EXISTS(SELECT 1 FROM learning_ai_tasks WHERE task=$2)`, task, legacy); err != nil {
+				if _, err = s.db.ExecContext(ctx, `UPDATE learning_ai_tasks SET (model_ids,backend,codex_model)=(SELECT model_ids,backend,codex_model FROM learning_ai_tasks WHERE task=$2) WHERE task=$1 AND EXISTS(SELECT 1 FROM learning_ai_tasks WHERE task=$2)`, task, legacy); err != nil {
 					return err
 				}
 			}
@@ -98,7 +106,7 @@ func (s *server) taskModels(ctx context.Context, task string, personal bool) ([]
 	}
 	var backend, codexModel string
 	if s.db.QueryRowContext(ctx, `SELECT backend,codex_model FROM learning_ai_tasks WHERE task=$1`, task).Scan(&backend, &codexModel) == nil && backend == "codex" {
-		if account(ctx).Role != "admin" || (task != "outline" && task != "extract") || os.Getenv("LEARNING_CODEX_RUNNER_URL") == "" {
+		if account(ctx).Role != "admin" || !isPDFTask(task) || os.Getenv("LEARNING_CODEX_RUNNER_URL") == "" {
 			return nil, aiModel{}, fmt.Errorf("Codex入库服务尚未配置")
 		}
 		m := aiModel{ID: -1, ModelID: codexModel}
@@ -250,7 +258,7 @@ func (s *server) saveLearningTask(w http.ResponseWriter, r *http.Request) {
 	if in.Backend == "" {
 		in.Backend = "api"
 	}
-	if (in.Backend != "api" && in.Backend != "codex") || (in.Backend == "codex" && in.Task != "outline" && in.Task != "extract") || (in.CodexModel != "" && !modelSlug.MatchString(in.CodexModel)) {
+	if (in.Backend != "api" && in.Backend != "codex") || (in.Backend == "codex" && !isPDFTask(in.Task)) || (in.CodexModel != "" && !modelSlug.MatchString(in.CodexModel)) {
 		fail(w, 400, "任务后端配置无效")
 		return
 	}

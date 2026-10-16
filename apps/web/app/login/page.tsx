@@ -148,7 +148,9 @@ export default function Login() {
           </p>
         )}
         <p className="setting-note">
-          <Link href="/register">没有账号？创建自己的账户</Link>。忘记密码或丢失验证器时，请联系管理员重置；登录后可在“设置 → 密码与登录安全”修改密码。
+          <Link href="/register">没有账号？创建自己的账户</Link>
+          。忘记密码或丢失验证器时，请联系管理员重置；登录后可在“设置 →
+          密码与登录安全”修改密码。
         </p>
       </section>
     </main>

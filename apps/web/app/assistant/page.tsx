@@ -9,7 +9,10 @@ import { parsePendingAI, type PendingAI } from "../../lib/ai-state";
 import { useProtected, Navigation, Loading } from "../providers";
 import { useVoice, VoicePicker, useSpeech, AudioOutput } from "../speech";
 import { Icon, type IconName } from "../icons";
-import { GuangdongPractice,type SpeakingLesson } from "../components/GuangdongPractice";
+import {
+  GuangdongPractice,
+  type SpeakingLesson,
+} from "../components/GuangdongPractice";
 
 type Conversation = { id: string; title: string; updated_at: string };
 type Message = {
@@ -31,7 +34,7 @@ type Analysis = {
   paraphrase: string;
   check: { question: string; answer: string; explanation: string };
 };
-type Training = Partial<Omit<SpeakingLesson,"kind">> & {
+type Training = Partial<Omit<SpeakingLesson, "kind">> & {
   id: string;
   kind: "sentence" | "listening";
   title?: string;
@@ -64,8 +67,8 @@ export default function Assistant() {
   const [sentence, setSentence] = useState("");
   const [topic, setTopic] = useState("校园生活与一次时间安排");
   const [level, setLevel] = useState("A2");
-  const [format,setFormat]=useState("guangdong_b");
-  const [focus,setFocus]=useState("记笔记与信息保持");
+  const [format, setFormat] = useState("guangdong_b");
+  const [focus, setFocus] = useState("记笔记与信息保持");
   const [answers, setAnswers] = useState<number[]>([]);
   const [showCheck, setShowCheck] = useState(false);
   const [showSentenceDemo, setShowSentenceDemo] = useState(false);
@@ -252,7 +255,7 @@ export default function Assistant() {
         request_id: requestID(),
         text: tab === "sentence" ? sentence : topic,
         level: tab === "listening" ? level : "",
-        ...(tab==="listening"?{format,focus}:{}),
+        ...(tab === "listening" ? { format, focus } : {}),
       },
     });
   }
@@ -507,10 +510,37 @@ export default function Assistant() {
             <h2>听清信息，也记住信息</h2>
             <form className="form-stack" onSubmit={generate}>
               <div className="form-grid">
-                <label>训练题型<select value={format} onChange={e=>setFormat(e.target.value)} disabled={busy||!!pending}>
-                  <option value="guangdong_a">广东 Part A · 模仿朗读</option><option value="guangdong_b">广东 Part B · 三问五答</option><option value="guangdong_c">广东 Part C · 故事复述</option><option value="choice">基础听力 · 四选一</option>
-                </select></label>
-                <label>训练重点<select value={focus} onChange={e=>setFocus(e.target.value)} disabled={busy||!!pending}>{["记笔记与信息保持","时间数字与地点变更","英语问句结构","故事主线与转折","意群停顿与连读"].map(x=><option key={x}>{x}</option>)}</select></label>
+                <label>
+                  训练题型
+                  <select
+                    value={format}
+                    onChange={(e) => setFormat(e.target.value)}
+                    disabled={busy || !!pending}
+                  >
+                    <option value="guangdong_a">广东 Part A · 模仿朗读</option>
+                    <option value="guangdong_b">广东 Part B · 三问五答</option>
+                    <option value="guangdong_c">广东 Part C · 故事复述</option>
+                    <option value="choice">基础听力 · 四选一</option>
+                  </select>
+                </label>
+                <label>
+                  训练重点
+                  <select
+                    value={focus}
+                    onChange={(e) => setFocus(e.target.value)}
+                    disabled={busy || !!pending}
+                  >
+                    {[
+                      "记笔记与信息保持",
+                      "时间数字与地点变更",
+                      "英语问句结构",
+                      "故事主线与转折",
+                      "意群停顿与连读",
+                    ].map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </select>
+                </label>
                 <label>
                   听力主题
                   <input
@@ -542,7 +572,14 @@ export default function Assistant() {
               </button>
             </form>
           </section>
-          {lesson?.kind === "listening" && lesson.speaking_tasks && <GuangdongPractice key={lesson.id} lesson={lesson as SpeakingLesson} modelID={selectedModel?.id||0} onUpdate={d=>setLesson(d as Training)} />}
+          {lesson?.kind === "listening" && lesson.speaking_tasks && (
+            <GuangdongPractice
+              key={lesson.id}
+              lesson={lesson as SpeakingLesson}
+              modelID={selectedModel?.id || 0}
+              onUpdate={(d) => setLesson(d as Training)}
+            />
+          )}
           {lesson?.kind === "listening" && !lesson.speaking_tasks && (
             <section className="panel glass listening-lesson">
               <h2>{lesson.title}</h2>

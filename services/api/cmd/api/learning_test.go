@@ -330,6 +330,15 @@ func TestLearningPDFReviewPipeline(t *testing.T) {
 	if n != 1 {
 		t.Fatal("re-import duplicated question")
 	}
+	chapter.Key = "u2"
+	chapter.Title = "Unit 2"
+	if _, err = s.extractPDF(ctx, learningJobPayload{DocumentID: "doc", Chapters: []chapterSelection{chapter}}); err != nil {
+		t.Fatal(err)
+	}
+	s.db.QueryRow(`SELECT count(*) FROM learning_questions WHERE document_id='doc'`).Scan(&n)
+	if n != 2 {
+		t.Fatal("restarting exercise numbering in another chapter lost a question")
+	}
 	a.call("GET", "/api/v1/admin/learning/documents", nil, 403)
 }
 

@@ -282,7 +282,14 @@ export default function AdminLearning() {
                 >
                   恢复默认提示词
                 </button>
-                {["outline", "extract"].includes(task.task) && (
+                {[
+                  "outline",
+                  "extract",
+                  "ocr",
+                  "extract_questions",
+                  "extract_answers",
+                  "match_answers",
+                ].includes(task.task) && (
                   <>
                     <label>
                       入库方式

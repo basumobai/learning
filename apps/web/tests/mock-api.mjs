@@ -106,7 +106,12 @@ export async function installMockAPI(context, options = {}) {
       });
       return;
     }
-    if (p === "/auth/me")
+    if (p === "/admin/learning/local-files")
+      data = { files: [], host_directory: "./data/pdf" };
+    else if (p === "/auth/options") data = { registration_open: true };
+    else if (p === "/admin/registration")
+      data = { registration_open: true, default_group_id: 1 };
+    else if (p === "/auth/me")
       data = {
         user: {
           id: "test",

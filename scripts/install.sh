@@ -54,6 +54,23 @@ done
 
 need openssl
 need python3
+validate_origin() {
+  ORIGIN_TO_CHECK="$1" python3 - <<'PY'
+import os, urllib.parse
+raw = os.environ['ORIGIN_TO_CHECK']
+try:
+    u = urllib.parse.urlsplit(raw)
+    valid = (u.scheme in ('http', 'https') and bool(u.hostname) and not u.username
+             and not u.password and u.path in ('', '/') and not u.query and not u.fragment
+             and u.port != 0 and not any(c.isspace() for c in raw)
+             and not any(c in u.netloc for c in ('\\', '%'))
+             and (u.scheme == 'https' or u.hostname in ('localhost', '127.0.0.1')))
+except ValueError:
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
+}
+[[ -z "$EXPECTED_ORIGIN" ]] || validate_origin "$EXPECTED_ORIGIN" || die "指定来源无效，必须是单一 HTTPS 域名（本机允许 HTTP）；未生成配置。"
 need docker
 docker info >/dev/null 2>&1 || die "Docker 不可用，无法安全判断旧数据库是否存在；请启动 Docker 并确认当前用户权限后重试。未生成新密钥。"
 docker compose version >/dev/null 2>&1 || die "需要 Docker Compose v2 插件。"
@@ -171,18 +188,7 @@ for key in POSTGRES_PASSWORD APP_ORIGIN ELS_ADMIN_USERNAME ELS_ADMIN_PASSWORD AP
 done
 
 app_origin="$(normalize_quoted "$(read_env APP_ORIGIN)")"
-ORIGIN_TO_CHECK="$app_origin" python3 - <<'PY' || die "APP_ORIGIN 必须是单一 HTTPS 域名（本机允许 HTTP），不能带路径、查询或用户信息。"
-import os, urllib.parse
-u = urllib.parse.urlsplit(os.environ['ORIGIN_TO_CHECK'])
-try:
-    valid = (u.scheme in ('http', 'https') and bool(u.hostname) and not u.username
-             and not u.password and u.path in ('', '/') and not u.query and not u.fragment
-             and u.port != 0 and not any(c.isspace() for c in u.netloc)
-             and (u.scheme == 'https' or u.hostname in ('localhost', '127.0.0.1')))
-except ValueError:
-    valid = False
-raise SystemExit(0 if valid else 1)
-PY
+validate_origin "$app_origin" || die "APP_ORIGIN 必须是单一 HTTPS 域名（本机允许 HTTP），不能带路径、查询或用户信息。"
 [[ -z "$EXPECTED_ORIGIN" || "${EXPECTED_ORIGIN%/}" == "${app_origin%/}" ]] || die "指定域名与 .env 的 APP_ORIGIN 不一致。请核对正式域名后仅修改 APP_ORIGIN，再重新运行；原有密钥未覆盖。"
 if [[ "$app_origin" == http://localhost:* && "$app_origin" != "http://localhost:$web_port" ]]; then
   die "APP_ORIGIN 的本机端口与 WEB_PORT 不一致，请核对 .env。"

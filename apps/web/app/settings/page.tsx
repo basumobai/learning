@@ -96,7 +96,10 @@ export default function Settings() {
       <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">YOUR PACE · YOUR ACCOUNT</span>
         <h1>学得稳，也用得安心。</h1>
-        <p>账户：{auth.user?.username} · <a href="#security">修改我的密码</a> · <a href="#security">两步验证与设备登录</a></p>
+        <p>
+          账户：{auth.user?.username} · <a href="#security">修改我的密码</a> ·{" "}
+          <a href="#security">两步验证与设备登录</a>
+        </p>
       </section>
       {auth.user?.must_change_password && (
         <p className="notice" role="status">

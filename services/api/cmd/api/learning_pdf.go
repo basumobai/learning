@@ -551,7 +551,9 @@ func (s *server) extractPDF(ctx context.Context, p learningJobPayload) (any, err
 			sol, _ := json.Marshal(q.Solution)
 			provenance, _ := json.Marshal(map[string]any{"question_pages": q.QuestionPages, "answer_pages": q.AnswerPages, "original_answer": q.AnswerQuote, "needs_review": q.NeedsReview, "ai_generated": true})
 			qid := security.Token(18)
-			result, err := tx.ExecContext(ctx, `INSERT INTO learning_questions(id,subject_id,chapter_id,kind,content,solution,provenance,document_id,source_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(document_id,source_key) DO NOTHING`, qid, subject, chapterID, q.Kind, string(content), string(sol), string(provenance), p.DocumentID, q.SourceKey)
+			// Exercise numbers commonly restart at 1 in each chapter. Preserve legacy
+			// source keys while namespacing newly imported questions by stable chapter ID.
+			result, err := tx.ExecContext(ctx, `INSERT INTO learning_questions(id,subject_id,chapter_id,kind,content,solution,provenance,document_id,source_key) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9 WHERE NOT EXISTS(SELECT 1 FROM learning_questions WHERE document_id=$8 AND chapter_id=$3 AND source_key=$10) ON CONFLICT(document_id,source_key) DO NOTHING`, qid, subject, chapterID, q.Kind, string(content), string(sol), string(provenance), p.DocumentID, chapterID+":"+q.SourceKey, q.SourceKey)
 			if err != nil {
 				tx.Rollback()
 				return nil, err
