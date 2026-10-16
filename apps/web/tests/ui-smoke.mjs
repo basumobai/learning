@@ -17,6 +17,8 @@ let submitted = false,
   draft = {},
   difficulty = "normal",
   round = 0;
+const explanationRequests = [];
+let selectedModels = { model_id: 1, reviewer_ids: [1, 2], lead_model_id: 3 };
 const question = {
   id: "q1",
   subject_id: "english",
@@ -77,7 +79,10 @@ function attempt() {
     submitted_at: submitted ? new Date().toISOString() : null,
     answers: submitted ? draft : null,
     draft,
-    feedback: submitted ? { score: 0, max_score: 2, needs_ai: false } : null,
+    feedback: submitted
+      ? { score: draft["1"] === "A" ? 2 : 0, max_score: 2, needs_ai: false }
+      : null,
+    explanation_needed: submitted && draft["1"] !== "A",
     jobs: [],
   };
 }
@@ -97,11 +102,26 @@ await context.route("**/api/v1/**", async (route) => {
       },
       csrf_token: "test",
     };
-  else if (p === "/learning/catalog")
+  else if (p === "/learning/model-options")
+    data = {
+      group: { id: 1, name: "进阶学习组" },
+      models: [
+        { id: 1, name: "讲解模型", provider: "学校", model_id: "one" },
+        { id: 2, name: "推理模型", provider: "学校", model_id: "two" },
+        { id: 3, name: "主审模型", provider: "学校", model_id: "three" },
+      ],
+      selection: selectedModels,
+      personal_enabled: false,
+    };
+  else if (p === "/learning/model-preferences") {
+    selectedModels = body;
+    data = { saved: true };
+  } else if (p === "/learning/catalog")
     data = {
       region: "广东",
       subjects: [
         { id: "english", types: [{ id: "reading", name: "阅读理解" }] },
+        { id: "chinese", types: [{ id: "essay", name: "作文" }] },
       ],
       chapters: [
         {
@@ -125,8 +145,11 @@ await context.route("**/api/v1/**", async (route) => {
     submitted = true;
     draft = body.answers;
     data = attempt();
-  } else if (p.endsWith("/explanation")) data = { id: "job1" };
-  else if (p === "/learning/jobs/job1")
+  } else if (p.endsWith("/explanation")) {
+    assert.equal(submitted, true, "AI requested before submitting");
+    explanationRequests.push(body);
+    data = { id: "job1" };
+  } else if (p === "/learning/jobs/job1")
     data = {
       id: "job1",
       kind: "explanation",
@@ -173,6 +196,36 @@ await context.route("**/api/v1/**", async (route) => {
       correct_id: "A",
       picked: body.picked,
     };
+  else if (p === "/ai/models")
+    data = { models: [{ id: 1, name: "讲解模型", kind: "chat", voices: [] }] };
+  else if (p === "/preferences")
+    data = { tts_model_id: 0, voice: "", timezone: "Asia/Shanghai" };
+  else if (p === "/ai/conversations") data = { conversations: [] };
+  else if (p === "/ai/training")
+    data =
+      route.request().method() === "POST"
+        ? {
+            id: "sentence1",
+            kind: "sentence",
+            data: {
+              text: question.content.passage,
+              analysis: {
+                translation: "你借我的书帮助了我。",
+                main_clause: "The book helped me.",
+                chunks: [
+                  { text: "The book", role: "主语", explanation: "书是主语" },
+                ],
+                grammar: ["that引导定语从句"],
+                paraphrase: "This book helped.",
+                check: {
+                  question: "主语是什么？",
+                  answer: "The book",
+                  explanation: "书帮助了我。",
+                },
+              },
+            },
+          }
+        : { training: [] };
   else if (p === "/admin/config")
     data = {
       models: [
@@ -237,13 +290,38 @@ for (const width of [320, 390, 768, 1440]) {
 }
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto(base + "/practice?subject=english");
+await page.getByText("进阶学习组", { exact: true }).waitFor();
+await page.getByRole("combobox", { name: /助学模型/ }).selectOption("2");
+await page.getByText("模型选择已保存", { exact: true }).waitFor();
+assert.equal(selectedModels.model_id, 2);
+checks++;
+await page.setViewportSize({ width: 1440, height: 1000 });
+await noOverflow();
+await page.screenshot({
+  path: "../../docs/previews/learning-practice-desktop.png",
+  fullPage: true,
+});
+await page.setViewportSize({ width: 390, height: 844 });
 await page.getByRole("button", { name: "开始练习", exact: true }).click();
 await page.getByRole("heading", { name: question.content.text }).waitFor();
+assert.equal(
+  explanationRequests.length,
+  0,
+  "opening a question generated an explanation",
+);
+checks++;
 assert.equal(await page.locator(".timeline-player").count(), 0);
 checks++;
 await page.locator(".question-choices label").nth(1).click();
-await page.getByRole("button", { name: "提交并看讲解" }).click();
+await page.getByRole("button", { name: "提交作答" }).click();
 await page.locator(".highlight").waitFor();
+assert.equal(await page.locator(".correct-choice").count(), 1);
+assert.equal(await page.locator(".incorrect-choice").count(), 1);
+checks++;
+assert.equal(explanationRequests.length, 1);
+assert.equal(explanationRequests[0].reason, "incorrect");
+assert.equal(explanationRequests[0].model_selection.model_id, 2);
+checks++;
 assert.equal(await page.locator(".annotation-role").innerText(), "主语");
 checks++;
 await page.getByRole("button", { name: "下一步", exact: true }).click();
@@ -260,6 +338,39 @@ await page.screenshot({
   path: "../../docs/previews/learning-explanation-mobile.png",
   fullPage: true,
 });
+// A correct answer uses no AI until the student explicitly asks for help.
+await page.goto(base + "/practice?subject=english");
+await page.getByRole("button", { name: "开始练习", exact: true }).click();
+await page.locator(".question-choices label").first().click();
+await page.getByRole("button", { name: "提交作答", exact: true }).click();
+await page
+  .getByRole("button", { name: "没理解，动态讲解", exact: true })
+  .waitFor();
+assert.equal(explanationRequests.length, 1);
+assert.equal(await page.locator(".timeline-player").count(), 0);
+checks++;
+await page
+  .getByRole("button", { name: "没理解，动态讲解", exact: true })
+  .click();
+await page.locator(".timeline-player").waitFor();
+assert.equal(explanationRequests.length, 2);
+assert.equal(explanationRequests[1].reason, "self_report");
+checks++;
+// The essay selector offers only identity-group models and supports independent reviewers.
+await page.goto(base + "/practice?subject=chinese");
+await page
+  .getByRole("group", { name: "作文独立评审 · 选择2至5个", exact: true })
+  .waitFor();
+await page.getByRole("checkbox", { name: "推理模型", exact: true }).uncheck();
+await page.getByRole("checkbox", { name: "主审模型", exact: true }).check();
+await page
+  .getByRole("combobox", { name: "主审模型", exact: true })
+  .selectOption("2");
+await page.getByText("模型选择已保存", { exact: true }).waitFor();
+assert.deepEqual(selectedModels.reviewer_ids, [1, 3]);
+assert.equal(selectedModels.lead_model_id, 2);
+checks++;
+await noOverflow();
 for (const level of ["普通", "绝望"]) {
   await page.goto(base + "/challenge");
   await page.getByRole("radio", { name: level, exact: false }).check();
@@ -277,6 +388,20 @@ for (const level of ["普通", "绝望"]) {
   await noOverflow();
   await page.getByRole("button", { name: "停止连做" }).click();
 }
+await page.goto(base + "/assistant#sentence");
+await page.getByLabel("英语原句").fill(question.content.passage);
+await page.getByRole("button", { name: "拆解这句话", exact: true }).click();
+await page.locator(".sentence-analysis").waitFor();
+assert.equal(await page.locator(".timeline-player").count(), 0);
+checks++;
+await page.getByRole("button", { name: "查看参考答案", exact: true }).click();
+assert.equal(await page.locator(".timeline-player").count(), 0);
+checks++;
+await page
+  .getByRole("button", { name: "没理解，动态演示", exact: true })
+  .click();
+await page.locator(".timeline-player").waitFor();
+checks++;
 await page.goto(base + "/admin/learning");
 await page
   .getByRole("button", { name: "AI 提示词与模型", exact: true })

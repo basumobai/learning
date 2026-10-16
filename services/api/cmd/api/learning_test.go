@@ -161,9 +161,21 @@ func TestLearningLazyJobsChatAndPersonalSecrets(t *testing.T) {
 	if calls.Load() != 0 {
 		t.Fatal("AI before question reached")
 	}
-	job := a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]bool{"personal": false}, 202)
+
+	a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]any{"reason": "self_report"}, 403)
+	var count int
+	s.db.QueryRow(`SELECT count(*) FROM learning_jobs`).Scan(&count)
+	if count != 0 || calls.Load() != 0 {
+		t.Fatal("opening or early request queued AI")
+	}
+	a.call("POST", "/api/v1/learning/attempts/"+id+"/submit", map[string]any{"answers": map[string]string{"1": "A"}}, 200)
+	a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]any{"reason": "incorrect"}, 409)
+	if calls.Load() != 0 {
+		t.Fatal("correct answer spent model calls")
+	}
+	job := a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]any{"reason": "self_report"}, 202)
 	jid := rawString(job, "id")
-	again := a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]bool{"personal": false}, 202)
+	again := a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]any{"reason": "self_report"}, 202)
 	if jid != rawString(again, "id") {
 		t.Fatal("duplicate job")
 	}
@@ -174,15 +186,10 @@ func TestLearningLazyJobsChatAndPersonalSecrets(t *testing.T) {
 		t.Fatal("duplicate call")
 	}
 	result := a.call("GET", "/api/v1/learning/jobs/"+jid, nil, 200)
-	if string(result["result"]) != "null" {
-		t.Fatal("explanation leaked before submission")
-	}
-	b.call("GET", "/api/v1/learning/jobs/"+jid, nil, 404)
-	a.call("POST", "/api/v1/learning/attempts/"+id+"/submit", map[string]any{"answers": map[string]string{"1": "A"}}, 200)
-	result = a.call("GET", "/api/v1/learning/jobs/"+jid, nil, 200)
 	if string(result["status"]) != `"completed"` || string(result["result"]) == "null" {
 		t.Fatal(result)
 	}
+	b.call("GET", "/api/v1/learning/jobs/"+jid, nil, 404)
 	chat := map[string]any{"job_id": jid, "step_id": "s1", "content": "为什么？", "request_id": "learning-step-chat"}
 	a.call("POST", "/api/v1/learning/attempts/"+id+"/chat", chat, 200)
 	a.call("POST", "/api/v1/learning/attempts/"+id+"/chat", chat, 200)
@@ -340,6 +347,7 @@ func TestLearningEssayPanelAndTrainingRules(t *testing.T) {
 	s.db.Exec(`UPDATE learning_ai_tasks SET model_ids=$1,lead_model_id=$2 WHERE task='essay_reviewer'`, fmt.Sprintf("[%d,%d]", ids[0], ids[1]), ids[2])
 	var reviewers atomic.Int64
 	var leadCalls atomic.Int64
+	var revokeLead atomic.Bool
 	barrier := make(chan struct{})
 	s.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		var body struct {
@@ -362,6 +370,9 @@ func TestLearningEssayPanelAndTrainingRules(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Error("reviewers did not run concurrently")
 			}
+			if revokeLead.Load() {
+				s.db.Exec(`DELETE FROM group_models WHERE model_id=$1`, ids[2])
+			}
 			result = essayReview{Score: 50, Reason: "内容完整，表达可提升", Evidence: []string{"学"}, Suggestions: []string{"补充论据"}}
 		}
 		text, _ := json.Marshal(result)
@@ -377,7 +388,7 @@ func TestLearningEssayPanelAndTrainingRules(t *testing.T) {
 		t.Fatal("not a thirty-minute training deadline")
 	}
 	a.call("POST", "/api/v1/learning/attempts/"+id+"/submit", map[string]any{"answers": map[string]string{"1": strings.Repeat("学", 850) + "!!!abc123"}}, 400)
-	a.call("POST", "/api/v1/learning/attempts/"+id+"/submit", map[string]any{"answers": map[string]string{"1": strings.Repeat("学", 851)}}, 200)
+	a.call("POST", "/api/v1/learning/attempts/"+id+"/submit", map[string]any{"answers": map[string]string{"1": strings.Repeat("学", 851)}, "model_selection": learningModelSelection{ReviewerIDs: []int64{ids[1], ids[0]}, LeadModelID: ids[2]}}, 200)
 	if err := s.processLearningJob(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -393,5 +404,119 @@ func TestLearningEssayPanelAndTrainingRules(t *testing.T) {
 	}
 	if f.Score != 51 || len(f.Reviews) != 2 || f.Han != 851 || f.Needs || leadCalls.Load() != 1 {
 		t.Fatalf("unexpected essay result: %+v lead=%d", f, leadCalls.Load())
+	}
+	revokeLead.Store(true)
+	next := a.call("POST", "/api/v1/learning/attempts", map[string]any{"subject_id": "chinese", "kind": "essay", "request_id": "essay-revoke-lead"}, 200)
+	nextID := rawString(next, "id")
+	a.call("POST", "/api/v1/learning/attempts/"+nextID+"/submit", map[string]any{"answers": map[string]string{"1": strings.Repeat("学", 851)}, "model_selection": learningModelSelection{ReviewerIDs: []int64{ids[0], ids[1]}, LeadModelID: ids[2]}}, 200)
+	if err := s.processLearningJob(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	s.db.QueryRow(`SELECT status FROM learning_jobs WHERE payload->>'attempt_id'=$1 AND kind='essay'`, nextID).Scan(&status)
+	if status != "failed" || leadCalls.Load() != 1 {
+		t.Fatal("revoked lead called after independent reviews", status)
+	}
+}
+
+func TestLearningGroupChoicesAndRevokedQueue(t *testing.T) {
+	s, a, b := learningTestServer(t)
+	learningInsertQuestion(t, s, "english", "reading")
+	key, _ := security.Seal(s.encryptionKey, "admin-secret", "provider:choices")
+	if _, err := s.db.Exec(`INSERT INTO ai_providers(id,name,base_url,api_key) VALUES('choices','School','https://choices.test/v1',$1)`, key); err != nil {
+		t.Fatal(err)
+	}
+	ids := []int64{}
+	for _, name := range []string{"first", "second", "hidden"} {
+		var id int64
+		if err := s.db.QueryRow(`INSERT INTO ai_models(provider_id,model_id,name,kind) VALUES('choices',$1,$1,'chat') RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	s.db.Exec(`INSERT INTO group_models(group_id,model_id) VALUES(1,$1),(1,$2)`, ids[0], ids[1])
+	s.db.Exec(`UPDATE learning_ai_tasks SET model_ids=$1`, fmt.Sprintf("[%d]", ids[2]))
+	options := a.raw("GET", "/api/v1/learning/model-options", nil, 200)
+	if strings.Contains(options.Body.String(), "admin-secret") || strings.Contains(options.Body.String(), "hidden") {
+		t.Fatal("unauthorized model or credential exposed")
+	}
+	var o struct {
+		Selection learningModelSelection `json:"selection"`
+		Models    []aiModel              `json:"models"`
+	}
+	json.Unmarshal(options.Body.Bytes(), &o)
+	if len(o.Models) != 2 || o.Selection.ModelID != ids[0] {
+		t.Fatal(o)
+	}
+	choice := learningModelSelection{ModelID: ids[1], ReviewerIDs: []int64{ids[1], ids[0]}, LeadModelID: ids[0]}
+	a.call("POST", "/api/v1/learning/model-preferences", choice, 200)
+	a.call("POST", "/api/v1/learning/model-preferences", learningModelSelection{ModelID: ids[2]}, 403)
+	a.call("POST", "/api/v1/learning/model-preferences", learningModelSelection{ReviewerIDs: []int64{ids[0], ids[0]}}, 403)
+	mine := a.raw("GET", "/api/v1/learning/model-options", nil, 200)
+	json.Unmarshal(mine.Body.Bytes(), &o)
+	if o.Selection.ModelID != ids[1] || len(o.Selection.ReviewerIDs) != 2 {
+		t.Fatal("selection not retained")
+	}
+	theirs := b.raw("GET", "/api/v1/learning/model-options", nil, 200)
+	json.Unmarshal(theirs.Body.Bytes(), &o)
+	if o.Selection.ModelID != ids[0] {
+		t.Fatal("another user's preferences were copied")
+	}
+	var calls atomic.Int64
+	s.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		var body struct {
+			Model string `json:"model"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Model != "second" {
+			t.Errorf("queued choice changed to %s", body.Model)
+		}
+		out := `{"choices":[{"message":{"content":"{\"version\":1,\"text\":\"The book helped me.\",\"spans\":[{\"id\":\"s\",\"start\":0,\"end\":8,\"role\":\"subject\",\"tone\":\"yellow\"}],\"steps\":[{\"id\":\"one\",\"title\":\"subject\",\"explanation\":\"book\",\"span_ids\":[\"s\"],\"asset_ids\":[]}],\"summary\":\"book\"}"},"finish_reason":"stop"}]}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(out)), Header: http.Header{}}, nil
+	})}
+	start := a.call("POST", "/api/v1/learning/attempts", map[string]any{"subject_id": "english", "kind": "reading", "request_id": "choice-wrong-start"}, 200)
+	id := rawString(start, "id")
+	a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]any{"reason": "self_report", "model_selection": choice}, 403)
+	answer := a.call("POST", "/api/v1/learning/attempts/"+id+"/submit", map[string]any{"answers": map[string]string{"1": "B"}, "model_selection": learningModelSelection{ModelID: ids[2]}}, 200)
+	if string(answer["explanation_needed"]) != "true" {
+		t.Fatal("wrong answer did not enable explanation")
+	}
+	a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]any{"model_selection": learningModelSelection{ModelID: ids[2]}}, 403)
+	job := a.call("POST", "/api/v1/learning/attempts/"+id+"/explanation", map[string]any{"reason": "incorrect", "model_selection": choice}, 202)
+	jid := rawString(job, "id")
+	s.db.Exec(`DELETE FROM group_models WHERE model_id=$1`, ids[1])
+	if err := s.processLearningJob(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	failed := a.call("GET", "/api/v1/learning/jobs/"+jid, nil, 200)
+	if string(failed["status"]) != `"failed"` || calls.Load() != 0 {
+		t.Fatal("revoked queued model was called", failed)
+	}
+	s.db.Exec(`INSERT INTO group_models(group_id,model_id) VALUES(1,$1)`, ids[1])
+	a.call("POST", "/api/v1/learning/jobs/"+jid+"/retry", map[string]any{}, 202)
+	if err := s.processLearningJob(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	done := a.call("GET", "/api/v1/learning/jobs/"+jid, nil, 200)
+	if string(done["status"]) != `"completed"` || calls.Load() != 1 {
+		t.Fatal("authorized selection did not run", done)
+	}
+}
+func TestLearningSubjectiveExplanationWaitsForJudgment(t *testing.T) {
+	now := time.Now()
+	a := learningAttempt{Submitted: &now}
+	a.Question.Content.Parts = []platform.Part{{ID: "1", Points: 4}}
+	a.Feedback = json.RawMessage(`{"parts":[{"correct":false,"needs_ai":true}],"needs_ai":true}`)
+	if learningExplanationNeeded(a) {
+		t.Fatal("ungraded free text treated as wrong")
+	}
+	a.Feedback = json.RawMessage(`{"parts":[{"correct":false,"needs_ai":true}],"ai_grading":{"parts":[{"id":"1","score":4}]}}`)
+	if learningExplanationNeeded(a) {
+		t.Fatal("equivalent full-credit answer treated as wrong")
+	}
+	a.Feedback = json.RawMessage(`{"parts":[{"correct":false,"needs_ai":true}],"ai_grading":{"parts":[{"id":"1","score":2}]}}`)
+	if !learningExplanationNeeded(a) {
+		t.Fatal("graded lost points did not enable explanation")
 	}
 }

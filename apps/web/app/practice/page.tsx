@@ -12,6 +12,11 @@ import {
   type Timeline,
 } from "../../lib/learning";
 import { Loading, Navigation, useProtected } from "../providers";
+import {
+  LearningModelPicker,
+  type ModelOptions,
+  type ModelSelection,
+} from "../components/LearningModelPicker";
 import { TimelinePlayer } from "../components/TimelinePlayer";
 type Chapter = {
   id: string;
@@ -30,6 +35,13 @@ type Catalog = {
   chapters: Chapter[];
 };
 type Feedback = {
+  parts?: {
+    id: string;
+    correct: boolean;
+    needs_ai: boolean;
+    points: number;
+    max_points: number;
+  }[];
   score: number;
   max_score: number;
   needs_ai: boolean;
@@ -76,9 +88,18 @@ type Attempt = {
   draft: Record<string, string> | null;
   feedback: Feedback | null;
   jobs?: Job[];
+  explanation_needed: boolean;
 };
 export default function Practice() {
   const auth = useProtected();
+  const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null);
+  const [modelSelection, setModelSelection] = useState<ModelSelection>({
+    model_id: 0,
+    reviewer_ids: [],
+    lead_model_id: 0,
+  });
+  const [modelStatus, setModelStatus] = useState("");
+  const modelsChanged = useRef(false);
   const [catalog, setCatalog] = useState<Catalog | null>(null),
     [subject, setSubject] = useState("english"),
     [kind, setKind] = useState(""),
@@ -103,7 +124,7 @@ export default function Practice() {
     submitRef = useRef(false),
     dirty = useRef(false),
     attemptRef = useRef<Attempt | null>(null),
-    prefetch = useRef(""),
+    explanationRequested = useRef(""),
     nextRequest = useRef("");
   answersRef.current = answers;
   attemptRef.current = attempt;
@@ -116,12 +137,25 @@ export default function Practice() {
     offset.current = Date.parse(a.server_time) - Date.now();
     dirty.current = false;
     setSaving("");
+    const existing = a.jobs?.filter((j) => j.kind === "explanation").at(-1);
+    if (existing) {
+      explanationRequested.current = a.id;
+      void api<Job>(`/learning/jobs/${existing.id}`)
+        .then(setJob)
+        .catch((e) => setExplainError(e.message));
+    }
   }
   useEffect(() => {
     if (!auth.allowed) return;
     const params = new URLSearchParams(window.location.search);
     const requested = params.get("subject");
     if (subjects.some((s) => s.id === requested)) setSubject(requested!);
+    api<ModelOptions>("/learning/model-options")
+      .then((data) => {
+        setModelOptions(data);
+        setModelSelection(data.selection);
+      })
+      .catch((e) => setModelStatus(e.message));
     api<Catalog>("/learning/catalog")
       .then(setCatalog)
       .catch((e) => setError(e.message));
@@ -139,28 +173,59 @@ export default function Practice() {
     setChapters([]);
     setTextbook("");
     setTerm("");
-  }, [subject, kind]);
+  }, [subject]);
+  useEffect(() => {
+    if (!modelsChanged.current) return;
+    const timer = setTimeout(() => {
+      setModelStatus("正在保存选择…");
+      void api("/learning/model-preferences", modelSelection)
+        .then(() => setModelStatus("模型选择已保存"))
+        .catch((e) => setModelStatus(e.message));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [modelSelection]);
+  function chooseModels(value: ModelSelection) {
+    modelsChanged.current = true;
+    setModelSelection(value);
+  }
   const requestExplain = useCallback(
-    async (a: Attempt, force = false) => {
-      const key = `${a.id}:${personal}`;
-      if (prefetch.current === key && !force) return;
-      prefetch.current = key;
+    async (a: Attempt, reason: "incorrect" | "self_report", force = false) => {
+      if (!a.submitted_at || (explanationRequested.current === a.id && !force))
+        return;
+      explanationRequested.current = a.id;
       setExplainError("");
       try {
         const result = await api<{ id: string }>(
           `/learning/attempts/${a.id}/explanation`,
-          { personal },
+          {
+            personal,
+            reason,
+            model_selection: modelOptions ? modelSelection : undefined,
+          },
         );
-        setJob(await api<Job>(`/learning/jobs/${result.id}`));
+        let next = await api<Job>(`/learning/jobs/${result.id}`);
+        if (next.status === "failed") {
+          await api(`/learning/jobs/${result.id}/retry`, {});
+          next = { ...next, status: "queued", error: "" };
+        }
+        if (attemptRef.current?.id === a.id) setJob(next);
       } catch (e) {
-        setExplainError((e as Error).message);
+        if (attemptRef.current?.id === a.id)
+          setExplainError((e as Error).message);
       }
     },
-    [personal],
+    [personal, modelSelection, modelOptions],
   );
   useEffect(() => {
-    if (attempt) void requestExplain(attempt);
-  }, [attempt?.id, requestExplain]);
+    if (attempt?.submitted_at && attempt.explanation_needed && modelOptions)
+      void requestExplain(attempt, "incorrect");
+  }, [
+    attempt?.id,
+    attempt?.submitted_at,
+    attempt?.explanation_needed,
+    modelOptions,
+    requestExplain,
+  ]);
   useEffect(() => {
     if (
       !job ||
@@ -185,17 +250,34 @@ export default function Practice() {
       clearInterval(timer);
     };
   }, [job?.id, job?.status, !!job?.result, attempt?.submitted_at]);
+  const gradeFailed = !!attempt?.jobs?.some(
+    (j) => j.kind !== "explanation" && j.status === "failed",
+  );
   useEffect(() => {
-    if (!attempt?.submitted_at || !attempt.feedback?.needs_ai) return;
+    if (!attempt?.submitted_at || !attempt.feedback?.needs_ai || gradeFailed)
+      return;
+    let active = true;
     const timer = setInterval(
       () =>
-        api<Attempt>(`/learning/attempts/${attempt.id}`)
-          .then(setAttempt)
-          .catch((e) => setError(e.message)),
+        void api<Attempt>(`/learning/attempts/${attempt.id}`)
+          .then((next) => {
+            if (active && attemptRef.current?.id === next.id) setAttempt(next);
+          })
+          .catch((e) => {
+            if (active) setError(e.message);
+          }),
       3000,
     );
-    return () => clearInterval(timer);
-  }, [attempt?.id, attempt?.submitted_at, attempt?.feedback?.needs_ai]);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [
+    attempt?.id,
+    attempt?.submitted_at,
+    attempt?.feedback?.needs_ai,
+    gradeFailed,
+  ]);
   const saveDraft = useCallback(async () => {
     const a = attemptRef.current;
     if (!a || a.submitted_at || !dirty.current) return;
@@ -227,6 +309,7 @@ export default function Practice() {
       const next = await api<Attempt>(`/learning/attempts/${a.id}/submit`, {
         answers: answersRef.current,
         personal,
+        model_selection: modelOptions ? modelSelection : undefined,
       });
       install(next);
       if (job?.id) setJob(await api<Job>(`/learning/jobs/${job.id}`));
@@ -236,7 +319,7 @@ export default function Practice() {
       submitRef.current = false;
       setBusy(false);
     }
-  }, [personal, job?.id, saveDraft]);
+  }, [personal, modelSelection, modelOptions, job?.id, saveDraft]);
   useEffect(() => {
     if (!attempt?.deadline || attempt.submitted_at) {
       setSeconds(null);
@@ -267,9 +350,12 @@ export default function Practice() {
         request_id: nextRequest.current,
       });
       nextRequest.current = "";
+      setJob(null);
+      setExplainError("");
+      explanationRequested.current = "";
       install(a);
       setChat([]);
-      setJob(null);
+      setStep("");
       window.history.replaceState(
         null,
         "",
@@ -301,6 +387,7 @@ export default function Practice() {
           content: text,
           request_id: requestID(),
           personal,
+          model_selection: modelOptions ? modelSelection : undefined,
         },
       );
       setChat((v) => [...v, { question: text, answer: result.answer }]);
@@ -352,14 +439,33 @@ export default function Practice() {
               : current.name}
             ，一步步学懂。
           </h1>
-          <p>先选题型，再划定教材与章节范围。</p>
+          <p>
+            {!attempt
+              ? "先选题型与范围，再开始专注练习。"
+              : submitted
+                ? "先看反馈。答错会生成动态讲解，没理解也可以主动求助。"
+                : "安心作答，草稿自动保存。提交后再看反馈与解析。"}
+          </p>
+          <ol className="practice-steps" aria-label="练习进度">
+            {["选择范围", "独立作答", "反馈与讲解"].map((label, i) => (
+              <li
+                key={label}
+                aria-current={
+                  i === (!attempt ? 0 : submitted ? 2 : 1) ? "step" : undefined
+                }
+              >
+                <span>{i + 1}</span>
+                {label}
+              </li>
+            ))}
+          </ol>
         </header>
         <div className="subject-tabs" role="group" aria-label="选择科目">
           {subjects.map((s) => (
             <button
               key={s.id}
               className={subject === s.id ? "primary" : "quiet"}
-              disabled={!!attempt && !submitted}
+              disabled={busy || (!!attempt && !submitted)}
               onClick={() => {
                 setSubject(s.id);
                 setAttempt(null);
@@ -376,445 +482,545 @@ export default function Practice() {
           </p>
         )}
         {!attempt && (
-          <section className="panel glass filter-panel">
-            <h2>今天练什么？</h2>
-            <div className="learning-filters">
-              <label>
-                题型
-                <select value={kind} onChange={(e) => setKind(e.target.value)}>
-                  {types.map((t) => (
-                    <option value={t.id} key={t.id}>
-                      {t.name}
-                    </option>
+          <div className="practice-setup">
+            <section className="panel glass filter-panel">
+              <h2>今天练什么？</h2>
+              <div className="learning-filters">
+                <label>
+                  题型
+                  <select
+                    value={kind}
+                    onChange={(e) => setKind(e.target.value)}
+                  >
+                    {types.map((t) => (
+                      <option value={t.id} key={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  教材范围
+                  <select
+                    value={textbook}
+                    onChange={(e) => {
+                      setTextbook(e.target.value);
+                      setChapters([]);
+                    }}
+                  >
+                    <option value="">全部教材</option>
+                    {Array.from(
+                      new Set(
+                        catalog?.chapters
+                          .filter((c) => c.subject_id === subject)
+                          .map((c) => c.textbook)
+                          .filter(Boolean),
+                      ),
+                    ).map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  学期
+                  <select
+                    value={term}
+                    onChange={(e) => {
+                      setTerm(e.target.value);
+                      setChapters([]);
+                    }}
+                  >
+                    <option value="">全部学期</option>
+                    {Array.from(
+                      new Set(
+                        catalog?.chapters
+                          .filter((c) => c.subject_id === subject)
+                          .map((c) => c.term)
+                          .filter(Boolean),
+                      ),
+                    ).map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <fieldset className="chapter-picker">
+                <legend>练习章节 · 可多选，未选则使用全部范围</legend>
+                {available
+                  .filter((c) => Number(c.question_count) > 0)
+                  .map((c) => (
+                    <label key={c.id}>
+                      <input
+                        type="checkbox"
+                        checked={chapters.includes(c.id)}
+                        onChange={(e) =>
+                          setChapters((v) =>
+                            e.target.checked
+                              ? [...v, c.id]
+                              : v.filter((id) => id !== c.id),
+                          )
+                        }
+                      />
+                      <span>
+                        {c.title}
+                        <small>
+                          {c.textbook} · {c.question_count}题
+                        </small>
+                      </span>
+                    </label>
                   ))}
-                </select>
-              </label>
-              <label>
-                教材范围
-                <select
-                  value={textbook}
-                  onChange={(e) => {
-                    setTextbook(e.target.value);
-                    setChapters([]);
-                  }}
-                >
-                  <option value="">全部教材</option>
-                  {Array.from(
-                    new Set(
-                      catalog?.chapters
-                        .filter((c) => c.subject_id === subject)
-                        .map((c) => c.textbook)
-                        .filter(Boolean),
-                    ),
-                  ).map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                学期
-                <select
-                  value={term}
-                  onChange={(e) => {
-                    setTerm(e.target.value);
-                    setChapters([]);
-                  }}
-                >
-                  <option value="">全部学期</option>
-                  {Array.from(
-                    new Set(
-                      catalog?.chapters
-                        .filter((c) => c.subject_id === subject)
-                        .map((c) => c.term)
-                        .filter(Boolean),
-                    ),
-                  ).map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <fieldset className="chapter-picker">
-              <legend>练习章节 · 可多选，未选则使用全部范围</legend>
-              {available
-                .filter((c) => Number(c.question_count) > 0)
-                .map((c) => (
-                  <label key={c.id}>
-                    <input
-                      type="checkbox"
-                      checked={chapters.includes(c.id)}
-                      onChange={(e) =>
-                        setChapters((v) =>
-                          e.target.checked
-                            ? [...v, c.id]
-                            : v.filter((id) => id !== c.id),
-                        )
-                      }
-                    />
-                    <span>
-                      {c.title}
-                      <small>
-                        {c.textbook} · {c.question_count}题
-                      </small>
-                    </span>
-                  </label>
-                ))}
-              {!available.some((c) => Number(c.question_count) > 0) && (
-                <p className="empty-state">
-                  这个范围还没有已发布题目。
-                  {auth.user?.role === "admin" && (
-                    <Link href="/admin/learning">去导入教学资料</Link>
-                  )}
+                {!available.some((c) => Number(c.question_count) > 0) && (
+                  <p className="empty-state">
+                    这个范围还没有已发布题目。
+                    {auth.user?.role === "admin" && (
+                      <Link href="/admin/learning">去导入教学资料</Link>
+                    )}
+                  </p>
+                )}
+              </fieldset>
+              <p className="range-summary">
+                {types.find((t) => t.id === kind)?.name || "选择题型"} ·{" "}
+                {chapters.length
+                  ? `已选${chapters.length}个章节`
+                  : "当前教材与学期的全部章节"}
+              </p>
+              {subject === "chinese" && (
+                <p className="setting-note">
+                  平台训练：作文30分钟，有效汉字超过850；阅读30分钟。上传Word或TXT也计入训练时间。
                 </p>
               )}
-            </fieldset>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={personal}
-                onChange={(e) => setPersonal(e.target.checked)}
+              <button
+                className="primary"
+                disabled={
+                  busy ||
+                  !kind ||
+                  !available.some((c) => Number(c.question_count) > 0)
+                }
+                onClick={start}
+              >
+                {busy ? "正在选题…" : "开始练习"}
+              </button>
+              {subject === "english" && (
+                <p className="section-links">
+                  <Link href="/english">词汇复习</Link> ·{" "}
+                  <Link href="/challenge">极速四选一</Link> ·{" "}
+                  <Link href="/assistant">长句与听力</Link>
+                </p>
+              )}
+            </section>
+            <aside className="panel glass model-setup">
+              <LearningModelPicker
+                options={modelOptions}
+                value={modelSelection}
+                onChange={chooseModels}
+                personal={personal}
+                onPersonal={setPersonal}
+                essay={subject === "chinese" && kind === "essay"}
+                status={modelStatus}
               />
-              使用我的 API 生成讲解和评价（<Link href="/settings">配置</Link>）
-            </label>
-            {subject === "chinese" && (
-              <p className="setting-note">
-                平台训练：作文30分钟，有效汉字超过850；阅读30分钟。上传Word或TXT也计入训练时间。
-              </p>
-            )}
-            <button
-              className="primary"
-              disabled={busy || !kind}
-              onClick={start}
-            >
-              {busy ? "正在选题…" : "开始练习"}
-            </button>
-            {subject === "english" && (
-              <p className="section-links">
-                <Link href="/english">词汇复习</Link> ·{" "}
-                <Link href="/challenge">极速四选一</Link> ·{" "}
-                <Link href="/assistant">长句与听力</Link>
-              </p>
-            )}
-          </section>
+            </aside>
+          </div>
         )}
         {attempt && (
           <>
-            <section className="panel glass question-panel">
-              <div className="question-heading">
-                <span className="eyebrow">
-                  {submitted ? "练习反馈" : "专注这一题"}
+            <div className="practice-context">
+              <div>
+                <strong>
+                  {types.find((t) => t.id === attempt.question.kind)?.name ||
+                    attempt.question.kind}
+                </strong>
+                <span>
+                  {" "}
+                  · 已作答{" "}
+                  {Object.values(answers).filter((v) => v.trim()).length} /{" "}
+                  {attempt.question.content.parts.length}
                 </span>
-                {seconds !== null && (
-                  <strong
-                    className={`practice-timer ${seconds < 60 ? "urgent" : ""}`}
-                    role="timer"
-                    aria-label="剩余时间"
-                  >
-                    {timeLabel(seconds)}
-                  </strong>
-                )}
               </div>
-              <h2>
-                <MathText text={attempt.question.content.text} />
-              </h2>
-              {attempt.question.content.passage && (
-                <div className="reading-passage">
-                  <MathText text={attempt.question.content.passage} />
-                </div>
-              )}
-              {attempt.question.assets.map((a) => (
-                <figure className="question-figure" key={a.id}>
-                  <img src={`/api/v1/learning/assets/${a.id}`} alt={a.alt} />
-                  <figcaption>{a.alt}</figcaption>
-                </figure>
-              ))}
-              {essay && !submitted && (
-                <label className="file-button">
-                  导入 .docx / .txt
-                  <input
-                    type="file"
-                    accept=".docx,.txt"
-                    onChange={(e) => {
-                      if (e.target.files?.[0])
-                        void importText(e.target.files[0]);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-              )}
-              {attempt.question.content.parts.map((p) => (
-                <fieldset className="question-part" key={p.id}>
-                  <legend>
-                    {p.id}. <MathText text={p.text} />{" "}
-                    <small>{p.points}分</small>
-                  </legend>
-                  {p.choices?.length ? (
-                    <div className="question-choices">
-                      {p.choices.map((c) => (
-                        <label
-                          key={c.id}
-                          className={
-                            (answers[p.id] || "").split(",").includes(c.id)
-                              ? "picked"
-                              : ""
-                          }
-                        >
-                          <input
-                            type={
-                              attempt.question.kind === "multiple_choice"
-                                ? "checkbox"
-                                : "radio"
-                            }
-                            name={`part-${p.id}`}
-                            disabled={submitted || busy}
-                            checked={(answers[p.id] || "")
-                              .split(",")
-                              .includes(c.id)}
-                            onChange={(e) => {
-                              if (attempt.question.kind === "multiple_choice") {
-                                const v = (answers[p.id] || "")
-                                  .split(",")
-                                  .filter(Boolean)
-                                  .filter((id) => id !== c.id);
-                                if (e.target.checked) v.push(c.id);
-                                answer(p.id, v.sort().join(","));
-                              } else answer(p.id, c.id);
-                            }}
-                          />
-                          <span>
-                            <b>{c.id}</b> <MathText text={c.text} />
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  ) : (
-                    <textarea
-                      aria-label={`第${p.id}题作答`}
-                      rows={essay ? 18 : 5}
-                      value={answers[p.id] || ""}
-                      disabled={submitted || busy}
-                      maxLength={12000}
-                      onChange={(e) => answer(p.id, e.target.value)}
-                      placeholder="写下你的思路与答案…"
-                    />
-                  )}
-                  {submitted && (
-                    <p className="reference-answer">
-                      参考答案：
-                      <MathText
-                        text={attempt.question.solution.answers[p.id]}
-                      />
-                    </p>
-                  )}
-                </fieldset>
-              ))}
-              {essay && (
-                <p className="word-counter">
-                  有效汉字 {hanCount(Object.values(answers).join(""))} / 至少851{" "}
-                  <span>标点、数字、字母不计入</span>
-                </p>
-              )}
-              {!submitted ? (
-                <div className="question-submit">
-                  <button
-                    className="primary"
-                    disabled={busy}
-                    onClick={() => void submit()}
-                  >
-                    {busy ? "正在交卷…" : "提交并看讲解"}
-                  </button>
-                  <span className="setting-note" role="status">
-                    {saving}
+              <details>
+                <summary>AI 模型与身份组</summary>
+                <LearningModelPicker
+                  options={modelOptions}
+                  value={modelSelection}
+                  onChange={chooseModels}
+                  personal={personal}
+                  onPersonal={setPersonal}
+                  essay={!!essay}
+                  status={modelStatus}
+                />
+              </details>
+            </div>
+            <div
+              className={
+                submitted ? "practice-session reviewed" : "practice-session"
+              }
+            >
+              <section className="panel glass question-panel">
+                <div className="question-heading">
+                  <span className="eyebrow">
+                    {submitted ? "练习反馈" : "专注这一题"}
                   </span>
+                  {seconds !== null && (
+                    <strong
+                      className={`practice-timer ${seconds < 60 ? "urgent" : ""}`}
+                      role="timer"
+                      aria-label="剩余时间"
+                    >
+                      {timeLabel(seconds)}
+                    </strong>
+                  )}
                 </div>
-              ) : (
-                <>
-                  <div className="learning-feedback">
-                    <h3>
-                      {attempt.feedback?.incomplete
-                        ? "作文未达到训练字数"
-                        : attempt.feedback?.needs_ai
-                          ? "已交卷，正在等待 AI 评价"
-                          : `参考得分 ${attempt.feedback?.score ?? 0} / ${attempt.feedback?.max_score ?? 0}`}
-                    </h3>
-                    {attempt.feedback?.timed_out && (
-                      <p>训练时间已结束，使用截止前保存的作答。</p>
-                    )}
-                    {attempt.feedback?.ai_reference && (
-                      <p className="setting-note">
-                        AI 训练参考评分，请结合教师意见。
-                      </p>
-                    )}
-                    {attempt.feedback?.ai_grading && (
-                      <>
-                        <p>{attempt.feedback.ai_grading.feedback}</p>
-                        {attempt.feedback.ai_grading.parts.map((p) => (
-                          <p key={p.id}>
-                            {p.id}：{p.score}分 · {p.reason}
-                            <br />
-                            错因：{p.mistake}
-                          </p>
-                        ))}
-                      </>
-                    )}
-                    {attempt.feedback?.essay_review && (
-                      <>
-                        <p>{attempt.feedback.essay_review.reason}</p>
-                        <p>{attempt.feedback.essay_review.disagreement}</p>
-                        <ul>
-                          {attempt.feedback.essay_review.suggestions.map(
-                            (s, i) => (
-                              <li key={i}>{s}</li>
-                            ),
-                          )}
-                        </ul>
-                        <details>
-                          <summary>查看独立评审</summary>
-                          {attempt.feedback.independent_reviews?.map((v, i) => (
-                            <article key={i}>
-                              <h4>
-                                评审{i + 1} · {v.score}分
-                              </h4>
-                              <p>{v.reason}</p>
-                              {v.evidence.map((s, j) => (
-                                <blockquote key={j}>{s}</blockquote>
-                              ))}
-                              <ul>
-                                {v.suggestions.map((s, j) => (
-                                  <li key={j}>{s}</li>
-                                ))}
-                              </ul>
-                            </article>
-                          ))}
-                        </details>
-                      </>
-                    )}
-                    {attempt.jobs
-                      ?.filter((j) => j.status === "failed")
-                      .map((j) => (
-                        <p key={j.id}>
-                          {j.error}
-                          <button
-                            className="quiet"
-                            onClick={() =>
-                              api(`/learning/jobs/${j.id}/retry`, {})
-                                .then(() =>
-                                  api<Attempt>(
-                                    `/learning/attempts/${attempt.id}`,
-                                  ),
-                                )
-                                .then(setAttempt)
-                                .catch((e) => setError(e.message))
+                <h2>
+                  <MathText text={attempt.question.content.text} />
+                </h2>
+                {attempt.question.content.passage && (
+                  <div className="reading-passage">
+                    <MathText text={attempt.question.content.passage} />
+                  </div>
+                )}
+                {attempt.question.assets.map((a) => (
+                  <figure className="question-figure" key={a.id}>
+                    <img src={`/api/v1/learning/assets/${a.id}`} alt={a.alt} />
+                    <figcaption>{a.alt}</figcaption>
+                  </figure>
+                ))}
+                {essay && !submitted && (
+                  <label className="file-button">
+                    导入 .docx / .txt
+                    <input
+                      type="file"
+                      accept=".docx,.txt"
+                      onChange={(e) => {
+                        if (e.target.files?.[0])
+                          void importText(e.target.files[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+                {attempt.question.content.parts.map((p) => (
+                  <fieldset className="question-part" key={p.id}>
+                    <legend>
+                      {p.id}. <MathText text={p.text} />{" "}
+                      <small>{p.points}分</small>
+                    </legend>
+                    {p.choices?.length ? (
+                      <div className="question-choices">
+                        {p.choices.map((c) => (
+                          <label
+                            key={c.id}
+                            className={
+                              submitted &&
+                              (attempt.question.solution.answers[p.id] || "")
+                                .split(",")
+                                .map((v) => v.trim())
+                                .includes(c.id)
+                                ? "correct-choice"
+                                : (answers[p.id] || "")
+                                      .split(",")
+                                      .includes(c.id)
+                                  ? submitted
+                                    ? "incorrect-choice"
+                                    : "picked"
+                                  : ""
                             }
                           >
-                            重试评价
-                          </button>
-                        </p>
-                      ))}
-                  </div>
-                  <details open>
-                    <summary>参考解析</summary>
-                    <p className="preserve-text">
-                      <MathText text={attempt.question.solution.explanation} />
-                    </p>
-                    <p>
-                      <MathText text={attempt.question.solution.rubric} />
-                    </p>
-                  </details>
-                  <button
-                    className="primary"
-                    onClick={() => {
-                      setAttempt(null);
-                      setJob(null);
-                      prefetch.current = "";
-                      window.history.replaceState(
-                        null,
-                        "",
-                        `/practice?subject=${subject}`,
-                      );
-                    }}
-                  >
-                    继续选题
-                  </button>
-                </>
-              )}
-            </section>
-            {submitted && (
-              <section className="panel glass dynamic-panel">
-                <h2>让思路动起来。</h2>
-                {timeline ? (
-                  <>
-                    <TimelinePlayer
-                      timeline={timeline}
-                      assets={attempt.question.assets}
-                      onStep={setStep}
-                    />
-                    <section className="embedded-tutor">
-                      <h3>这一步，还没理解？</h3>
-                      <p className="setting-note">
-                        只围绕当前题目和选中的步骤追问。
+                            <input
+                              type={
+                                attempt.question.kind === "multiple_choice"
+                                  ? "checkbox"
+                                  : "radio"
+                              }
+                              name={`part-${p.id}`}
+                              disabled={submitted || busy}
+                              checked={(answers[p.id] || "")
+                                .split(",")
+                                .includes(c.id)}
+                              onChange={(e) => {
+                                if (
+                                  attempt.question.kind === "multiple_choice"
+                                ) {
+                                  const v = (answers[p.id] || "")
+                                    .split(",")
+                                    .filter(Boolean)
+                                    .filter((id) => id !== c.id);
+                                  if (e.target.checked) v.push(c.id);
+                                  answer(p.id, v.sort().join(","));
+                                } else answer(p.id, c.id);
+                              }}
+                            />
+                            <span>
+                              <b>{c.id}</b> <MathText text={c.text} />
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : (
+                      <textarea
+                        aria-label={`第${p.id}题作答`}
+                        rows={essay ? 18 : 5}
+                        value={answers[p.id] || ""}
+                        disabled={submitted || busy}
+                        maxLength={12000}
+                        onChange={(e) => answer(p.id, e.target.value)}
+                        placeholder="写下你的思路与答案…"
+                      />
+                    )}
+                    {submitted && (
+                      <p className="reference-answer">
+                        参考答案：
+                        <MathText
+                          text={attempt.question.solution.answers[p.id]}
+                        />
                       </p>
-                      {chat.map((v, i) => (
-                        <div key={i} className="step-dialogue">
-                          <p>
-                            <strong>你：</strong>
-                            {v.question}
-                          </p>
-                          <p className="preserve-text">
-                            <strong>AI：</strong>
-                            {v.answer}
-                          </p>
-                        </div>
-                      ))}
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          void ask();
-                        }}
-                      >
-                        <label>
-                          对当前步骤的疑问
-                          <textarea
-                            value={question}
-                            onChange={(e) => setQuestion(e.target.value)}
-                            maxLength={2000}
-                            rows={3}
-                            placeholder="例如：为什么这部分是定语，而不是主句？"
-                          />
-                        </label>
-                        <button
-                          className="primary"
-                          disabled={busy || !question.trim() || !step}
-                        >
-                          问问 AI
-                        </button>
-                      </form>
-                    </section>
-                  </>
+                    )}
+                  </fieldset>
+                ))}
+                {essay && (
+                  <p className="word-counter">
+                    有效汉字 {hanCount(Object.values(answers).join(""))} /
+                    至少851 <span>标点、数字、字母不计入</span>
+                  </p>
+                )}
+                {!submitted ? (
+                  <div className="question-submit">
+                    <button
+                      className="primary"
+                      disabled={busy}
+                      onClick={() => void submit()}
+                    >
+                      {busy ? "正在交卷…" : "提交作答"}
+                    </button>
+                    <span className="setting-note" role="status">
+                      {saving}
+                    </span>
+                  </div>
                 ) : (
                   <>
-                    <p role="status">
-                      {job?.status === "failed"
-                        ? job.error
-                        : explainError || "正在后台生成这道题的动态讲解…"}
-                    </p>
-                    <button
-                      className="quiet"
-                      disabled={busy}
-                      onClick={() =>
-                        job?.status === "failed"
-                          ? api(`/learning/jobs/${job.id}/retry`, {})
-                              .then(() => setJob({ ...job, status: "queued" }))
-                              .catch((e) => setExplainError(e.message))
-                          : void requestExplain(attempt, true)
-                      }
-                    >
-                      重试生成
-                    </button>
+                    <div className="learning-feedback">
+                      <h3>
+                        {attempt.feedback?.incomplete
+                          ? "作文未达到训练字数"
+                          : attempt.feedback?.needs_ai
+                            ? "已交卷，正在等待 AI 评价"
+                            : `参考得分 ${attempt.feedback?.score ?? 0} / ${attempt.feedback?.max_score ?? 0}`}
+                      </h3>
+                      {attempt.feedback?.timed_out && (
+                        <p>训练时间已结束，使用截止前保存的作答。</p>
+                      )}
+                      {attempt.feedback?.ai_reference && (
+                        <p className="setting-note">
+                          AI 训练参考评分，请结合教师意见。
+                        </p>
+                      )}
+                      {attempt.feedback?.ai_grading && (
+                        <>
+                          <p>{attempt.feedback.ai_grading.feedback}</p>
+                          {attempt.feedback.ai_grading.parts.map((p) => (
+                            <p key={p.id}>
+                              {p.id}：{p.score}分 · {p.reason}
+                              <br />
+                              错因：{p.mistake}
+                            </p>
+                          ))}
+                        </>
+                      )}
+                      {attempt.feedback?.essay_review && (
+                        <>
+                          <p>{attempt.feedback.essay_review.reason}</p>
+                          <p>{attempt.feedback.essay_review.disagreement}</p>
+                          <ul>
+                            {attempt.feedback.essay_review.suggestions.map(
+                              (s, i) => (
+                                <li key={i}>{s}</li>
+                              ),
+                            )}
+                          </ul>
+                          <details>
+                            <summary>查看独立评审</summary>
+                            {attempt.feedback.independent_reviews?.map(
+                              (v, i) => (
+                                <article key={i}>
+                                  <h4>
+                                    评审{i + 1} · {v.score}分
+                                  </h4>
+                                  <p>{v.reason}</p>
+                                  {v.evidence.map((s, j) => (
+                                    <blockquote key={j}>{s}</blockquote>
+                                  ))}
+                                  <ul>
+                                    {v.suggestions.map((s, j) => (
+                                      <li key={j}>{s}</li>
+                                    ))}
+                                  </ul>
+                                </article>
+                              ),
+                            )}
+                          </details>
+                        </>
+                      )}
+                      {attempt.jobs
+                        ?.filter(
+                          (j) =>
+                            j.status === "failed" && j.kind !== "explanation",
+                        )
+                        .map((j) => (
+                          <p key={j.id}>
+                            {j.error}
+                            <button
+                              className="quiet"
+                              onClick={() =>
+                                api(`/learning/jobs/${j.id}/retry`, {
+                                  personal,
+                                  model_selection: modelOptions
+                                    ? modelSelection
+                                    : undefined,
+                                })
+                                  .then(() =>
+                                    api<Attempt>(
+                                      `/learning/attempts/${attempt.id}`,
+                                    ),
+                                  )
+                                  .then((next) => {
+                                    if (attemptRef.current?.id === next.id)
+                                      setAttempt(next);
+                                  })
+                                  .catch((e) => setError(e.message))
+                              }
+                            >
+                              重试评价
+                            </button>
+                          </p>
+                        ))}
+                    </div>
+                    <details open>
+                      <summary>参考解析</summary>
+                      <p className="preserve-text">
+                        <MathText
+                          text={attempt.question.solution.explanation}
+                        />
+                      </p>
+                      <p>
+                        <MathText text={attempt.question.solution.rubric} />
+                      </p>
+                    </details>
+                    <div className="question-submit">
+                      <button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => void start()}
+                      >
+                        {busy ? "正在选题…" : "再练一道"}
+                      </button>{" "}
+                      <button
+                        className="quiet"
+                        disabled={busy}
+                        onClick={() => {
+                          setAttempt(null);
+                          setJob(null);
+                          explanationRequested.current = "";
+                          setExplainError("");
+                          window.history.replaceState(
+                            null,
+                            "",
+                            `/practice?subject=${subject}`,
+                          );
+                        }}
+                      >
+                        调整练习范围
+                      </button>
+                    </div>
                   </>
                 )}
               </section>
-            )}
+              {submitted && (
+                <section className="panel glass dynamic-panel">
+                  <div className="panel-heading">
+                    <h2>一步步，看懂思路。</h2>
+                    <span className="access-badge">按需讲解</span>
+                  </div>
+                  {!job && !explainError && (
+                    <p className="setting-note">
+                      {attempt.explanation_needed
+                        ? "这道题有失分，正在准备讲解。"
+                        : "觉得还没学会？点下方按钮，再用动态标注看懂关键步骤。"}
+                    </p>
+                  )}
+                  {timeline ? (
+                    <>
+                      <TimelinePlayer
+                        timeline={timeline}
+                        assets={attempt.question.assets}
+                        onStep={setStep}
+                      />
+                      <section className="embedded-tutor">
+                        <h3>这一步，还没理解？</h3>
+                        <p className="setting-note">
+                          只围绕当前题目和选中的步骤追问。
+                        </p>
+                        {chat.map((v, i) => (
+                          <div key={i} className="step-dialogue">
+                            <p>
+                              <strong>你：</strong>
+                              {v.question}
+                            </p>
+                            <p className="preserve-text">
+                              <strong>AI：</strong>
+                              {v.answer}
+                            </p>
+                          </div>
+                        ))}
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void ask();
+                          }}
+                        >
+                          <label>
+                            对当前步骤的疑问
+                            <textarea
+                              value={question}
+                              onChange={(e) => setQuestion(e.target.value)}
+                              maxLength={2000}
+                              rows={3}
+                              placeholder="例如：为什么这部分是定语，而不是主句？"
+                            />
+                          </label>
+                          <button
+                            className="primary"
+                            disabled={busy || !question.trim() || !step}
+                          >
+                            问问 AI
+                          </button>
+                        </form>
+                      </section>
+                    </>
+                  ) : (
+                    <div className="explanation-request">
+                      {(job || explainError) && (
+                        <p role="status">
+                          {job?.status === "failed"
+                            ? job.error
+                            : explainError || "正在生成这道题的动态讲解…"}
+                        </p>
+                      )}
+                      {(!job || job.status === "failed" || explainError) && (
+                        <button
+                          className="primary"
+                          disabled={busy || !modelOptions}
+                          onClick={() =>
+                            void requestExplain(attempt, "self_report", true)
+                          }
+                        >
+                          {job?.status === "failed" || explainError
+                            ? "重新生成讲解"
+                            : "没理解，动态讲解"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
+            </div>
           </>
         )}
       </div>
