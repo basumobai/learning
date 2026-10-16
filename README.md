@@ -77,6 +77,7 @@ WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai
 - [功能与学习流程](docs/LEARNING.md) · [界面设计](docs/FRONTEND.md) · [安全与账号](docs/SECURITY.md)
 - [架构](docs/ARCHITECTURE.md) · [API](docs/API.md) · [数据库](docs/DATABASE.md) · [AI 设计](docs/AI.md) · [产品行为](docs/PRODUCT.md)
 - [验证与预览](docs/LEARNING_VALIDATION.md) · [与 AnkiDroid 对比](docs/ANKIDROID_COMPARISON.md) · [多端布局](docs/RESPONSIVE.md)
+- [v3.1 智能学习引擎升级计划（待开发）](docs/v3/LEARNING_V3_1_PLAN.md) · [开源来源与 MIT 兼容说明](docs/v3/OPEN_SOURCE_REFERENCES.md)
 
 ### 开发与测试
 
