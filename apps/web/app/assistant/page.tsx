@@ -64,6 +64,8 @@ export default function Assistant() {
   const [level, setLevel] = useState("A2");
   const [answers, setAnswers] = useState<number[]>([]);
   const [showCheck, setShowCheck] = useState(false);
+  const [showSentenceDemo, setShowSentenceDemo] = useState(false);
+  useEffect(() => setShowSentenceDemo(false), [lesson?.id]);
   const [pending, setPending] = useState<PendingAI | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -256,7 +258,6 @@ export default function Assistant() {
     speech.stop();
     setShowCheck(false);
   }
-  if (!auth.allowed) return <Loading />;
   const analysis = lesson?.kind === "sentence" ? lesson.data?.analysis : null;
   const dynamicSentence = useMemo(
     () =>
@@ -269,6 +270,7 @@ export default function Assistant() {
         : null,
     [analysis, lesson?.data],
   );
+  if (!auth.allowed) return <Loading />;
   return (
     <main className="shell">
       <Navigation />
@@ -469,6 +471,14 @@ export default function Assistant() {
                 )}
               </div>
               {showCheck && dynamicSentence && (
+                <button
+                  className="quiet"
+                  onClick={() => setShowSentenceDemo((v) => !v)}
+                >
+                  {showSentenceDemo ? "收起动态演示" : "没理解，动态演示"}
+                </button>
+              )}
+              {showCheck && showSentenceDemo && dynamicSentence && (
                 <div>
                   <h3>答错或没理解？跟着标注重新看。</h3>
                   <TimelinePlayer timeline={dynamicSentence} />

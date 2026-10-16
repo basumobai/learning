@@ -25,6 +25,8 @@ func (s *server) learningRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/learning/assets/{id}", s.learningAsset)
 	m.HandleFunc("GET /api/v1/learning/jobs/{id}", s.learningJob)
 	m.HandleFunc("POST /api/v1/learning/jobs/{id}/retry", s.retryLearningJob)
+	m.HandleFunc("GET /api/v1/learning/model-options", s.learningModelOptions)
+	m.HandleFunc("POST /api/v1/learning/model-preferences", s.saveLearningModelPreferences)
 	m.HandleFunc("GET /api/v1/learning/ai-settings", s.learningAISettings)
 	m.HandleFunc("POST /api/v1/learning/ai-settings", s.saveLearningAPI)
 	m.HandleFunc("POST /api/v1/learning/words/next", s.nextWordRound)
@@ -72,17 +74,18 @@ type learningQuestion struct {
 	Provenance json.RawMessage   `json:"provenance"`
 }
 type learningAttempt struct {
-	DraftVersion int64             `json:"draft_version"`
-	Jobs         json.RawMessage   `json:"jobs"`
-	ID           string            `json:"id"`
-	Question     learningQuestion  `json:"question"`
-	Started      time.Time         `json:"started_at"`
-	Deadline     *time.Time        `json:"deadline"`
-	Submitted    *time.Time        `json:"submitted_at"`
-	Answers      map[string]string `json:"answers"`
-	Draft        map[string]string `json:"draft"`
-	Feedback     json.RawMessage   `json:"feedback"`
-	ServerTime   time.Time         `json:"server_time"`
+	DraftVersion      int64             `json:"draft_version"`
+	Jobs              json.RawMessage   `json:"jobs"`
+	ID                string            `json:"id"`
+	Question          learningQuestion  `json:"question"`
+	Started           time.Time         `json:"started_at"`
+	Deadline          *time.Time        `json:"deadline"`
+	Submitted         *time.Time        `json:"submitted_at"`
+	Answers           map[string]string `json:"answers"`
+	Draft             map[string]string `json:"draft"`
+	Feedback          json.RawMessage   `json:"feedback"`
+	ServerTime        time.Time         `json:"server_time"`
+	ExplanationNeeded bool              `json:"explanation_needed"`
 }
 
 func (s *server) loadAttempt(ctx context.Context, id string) (learningAttempt, error) {
@@ -97,10 +100,11 @@ func (s *server) loadAttempt(ctx context.Context, id string) (learningAttempt, e
 	}
 	_ = json.Unmarshal(answers, &a.Answers)
 	_ = json.Unmarshal(draft, &a.Draft)
-	if err = s.db.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_object('id',id,'kind',kind,'status',status,'error',error)),'[]') FROM learning_jobs WHERE owner_id=$1 AND payload->>'attempt_id'=$2 AND kind IN ('grade','essay')`, userID(ctx), id).Scan(&a.Jobs); err != nil {
+	if err = s.db.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_object('id',id,'kind',kind,'status',status,'error',error) ORDER BY created_at,id),'[]') FROM learning_jobs WHERE owner_id=$1 AND payload->>'attempt_id'=$2 AND kind IN ('grade','essay','explanation')`, userID(ctx), id).Scan(&a.Jobs); err != nil {
 		return a, err
 	}
 	a.Feedback = feedback
+	a.ExplanationNeeded = learningExplanationNeeded(a)
 	a.Question.Assets = []map[string]any{}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,alt FROM learning_assets WHERE question_id=$1 ORDER BY id`, a.Question.ID)
 	if err != nil {
@@ -271,8 +275,9 @@ func feedbackFor(a learningAttempt, answers map[string]string) map[string]any {
 }
 func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Answers  map[string]string `json:"answers"`
-		Personal bool              `json:"personal"`
+		Answers        map[string]string       `json:"answers"`
+		Personal       bool                    `json:"personal"`
+		ModelSelection *learningModelSelection `json:"model_selection"`
 	}
 	if decodeLimit(r, &in, 120000) != nil {
 		fail(w, 400, "作答格式无效")
@@ -291,6 +296,8 @@ func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "作答内容无效")
 		return
 	}
+	// Model problems must not discard or delay a student's submitted answer.
+	// The grading worker validates group grants before any provider call.
 	// Deadline uses server-stored draft; late clients cannot replace a timed answer.
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -341,7 +348,18 @@ func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 		if a.Question.Subject == "chinese" && a.Question.Kind == "essay" {
 			kind = "essay"
 		}
-		payload, _ := json.Marshal(map[string]any{"attempt_id": a.ID, "personal": in.Personal})
+		p := learningJobPayload{AttemptID: a.ID, Personal: in.Personal, ModelSelection: in.ModelSelection}
+		task := "grading"
+		if kind == "essay" {
+			task = "essay_reviewer"
+		}
+		if models, lead, e := s.selectedLearningModels(r.Context(), task, in.Personal, in.ModelSelection); e == nil {
+			p.ModelFingerprint = learningModelsKey(models, lead)
+			if !in.Personal {
+				p.ModelSelection = learningSelectionSnapshot(task, models, lead)
+			}
+		}
+		payload, _ := json.Marshal(p)
 		_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_jobs(id,owner_id,kind,dedupe_key,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(owner_id,kind,dedupe_key) DO NOTHING`, security.Token(18), userID(r.Context()), kind, a.ID, string(payload))
 	}
 	if err == nil {
@@ -355,9 +373,11 @@ func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 }
 func (s *server) requestExplanation(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Personal bool `json:"personal"`
+		Personal       bool                    `json:"personal"`
+		Reason         string                  `json:"reason"`
+		ModelSelection *learningModelSelection `json:"model_selection"`
 	}
-	if decode(r, &in) != nil {
+	if decodeLimit(r, &in, 6000) != nil {
 		fail(w, 400, "请求格式无效")
 		return
 	}
@@ -366,22 +386,34 @@ func (s *server) requestExplanation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "练习不存在")
 		return
 	}
-	if _, _, err = s.taskModels(r.Context(), "explanation", in.Personal); err != nil {
-		fail(w, 400, "动态讲解尚未配置可用模型，仍可正常做题")
+	if a.Submitted == nil {
+		fail(w, 403, "先完成并提交作答，再按需生成动态讲解")
+		return
+	}
+	if in.Reason == "" {
+		in.Reason = "incorrect"
+	}
+	if in.Reason != "incorrect" && in.Reason != "self_report" {
+		fail(w, 400, "讲解触发方式无效")
+		return
+	}
+	if in.Reason == "incorrect" && !learningExplanationNeeded(a) {
+		fail(w, 409, "这道题尚未判错；没有理解可主动选择动态讲解")
+		return
+	}
+	models, lead, err := s.selectedLearningModels(r.Context(), "explanation", in.Personal, in.ModelSelection)
+	if err != nil {
+		fail(w, 403, "动态讲解模型不可用："+err.Error())
 		return
 	}
 	var revision int
 	_ = s.db.QueryRowContext(r.Context(), `SELECT revision FROM learning_ai_tasks WHERE task='explanation'`).Scan(&revision)
-	key := fmt.Sprintf("%s:%d:%d:%t", a.Question.ID, a.Question.Revision, revision, in.Personal)
-	if in.Personal {
-		m, e := s.personalModel(r.Context())
-		if e != nil {
-			fail(w, 400, "个人 API 不可用")
-			return
-		}
-		key += ":" + security.Digest(m.version+m.ModelID+m.baseURL)
+	key := fmt.Sprintf("%s:%d:%d:%s", a.ID, a.Question.Revision, revision, learningModelsKey(models, lead))
+	// Snapshot the resolved group model so later admin routing edits cannot switch queued work.
+	if !in.Personal {
+		in.ModelSelection = learningSelectionSnapshot("explanation", models, lead)
 	}
-	id, err := s.enqueueLearning(r.Context(), "explanation", key, map[string]any{"attempt_id": a.ID, "personal": in.Personal, "prompt_revision": revision})
+	id, err := s.enqueueLearning(r.Context(), "explanation", key, learningJobPayload{AttemptID: a.ID, Personal: in.Personal, PromptRevision: revision, Reason: in.Reason, ModelSelection: in.ModelSelection, ModelFingerprint: learningModelsKey(models, lead)})
 	if err != nil {
 		s.dbError(w, "queue explanation", err)
 		return
@@ -390,11 +422,12 @@ func (s *server) requestExplanation(w http.ResponseWriter, r *http.Request) {
 }
 func (s *server) questionChat(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		JobID     string `json:"job_id"`
-		StepID    string `json:"step_id"`
-		Content   string `json:"content"`
-		RequestID string `json:"request_id"`
-		Personal  bool   `json:"personal"`
+		JobID          string                  `json:"job_id"`
+		StepID         string                  `json:"step_id"`
+		Content        string                  `json:"content"`
+		RequestID      string                  `json:"request_id"`
+		Personal       bool                    `json:"personal"`
+		ModelSelection *learningModelSelection `json:"model_selection"`
 	}
 	if decodeLimit(r, &in, 16000) != nil || strings.TrimSpace(in.Content) == "" || len([]rune(in.Content)) > 2000 || !requestIDPattern.MatchString(in.RequestID) {
 		fail(w, 400, "请输入当前步骤的问题，最多2000字")
@@ -427,7 +460,7 @@ func (s *server) questionChat(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请选择有效讲解步骤")
 		return
 	}
-	models, _, err := s.taskModels(r.Context(), "question_tutor", in.Personal)
+	models, _, err := s.selectedLearningModels(r.Context(), "question_tutor", in.Personal, in.ModelSelection)
 	if err != nil {
 		fail(w, 403, err.Error())
 		return
@@ -466,6 +499,10 @@ func (s *server) questionChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if len([]rune(text)) > 8000 {
 		fail(w, 502, "模型回答过长，请重试")
+		return
+	}
+	if _, _, err = s.selectedLearningModels(r.Context(), "question_tutor", in.Personal, in.ModelSelection); err != nil {
+		fail(w, 403, "模型授权已变更")
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)

@@ -40,11 +40,10 @@ func (s *server) learningJob(w http.ResponseWriter, r *http.Request) {
 			fail(w, 404, "练习版本已更新")
 			return
 		}
-		var submitted bool
-		_ = s.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM learning_attempts WHERE user_id=$1 AND question_id=$2 AND question_revision=$3 AND submitted_at IS NOT NULL)`, userID(r.Context()), a.Question.ID, a.Question.Revision).Scan(&submitted)
-		if !submitted {
+		if a.Submitted == nil {
 			result = nil
 		}
+
 	}
 	if kind == "outline" || kind == "extract" || kind == "word_options" {
 		if account(r.Context()).Role != "admin" {
@@ -55,7 +54,54 @@ func (s *server) learningJob(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"id": r.PathValue("id"), "kind": kind, "status": status, "error": message, "result": json.RawMessage(result)})
 }
 func (s *server) retryLearningJob(w http.ResponseWriter, r *http.Request) {
-	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_jobs SET status='queued',error='',updated_at=now() WHERE id=$1 AND owner_id=$2 AND status='failed'`, r.PathValue("id"), userID(r.Context()))
+	var in struct {
+		ModelSelection *learningModelSelection `json:"model_selection"`
+		Personal       *bool                   `json:"personal"`
+	}
+	if decodeLimit(r, &in, 6000) != nil {
+		fail(w, 400, "请求格式无效")
+		return
+	}
+	var raw []byte
+	var kind string
+	if err := s.db.QueryRowContext(r.Context(), `SELECT payload,kind FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&raw, &kind); err != nil {
+		fail(w, 404, "任务不存在")
+		return
+	}
+	if kind == "explanation" && (in.ModelSelection != nil || in.Personal != nil) {
+		fail(w, 400, "更换讲解模型请重新请求动态讲解")
+		return
+	}
+	if kind == "grade" || kind == "essay" {
+		var p learningJobPayload
+		_ = json.Unmarshal(raw, &p)
+		if in.ModelSelection != nil {
+			if err := s.validateLearningSelection(r.Context(), in.ModelSelection); err != nil {
+				fail(w, 403, err.Error())
+				return
+			}
+			p.ModelSelection = in.ModelSelection
+		}
+		if in.Personal != nil {
+			p.Personal = *in.Personal
+		}
+		task := "grading"
+		if kind == "essay" {
+			task = "essay_reviewer"
+		}
+		models, lead, err := s.selectedLearningModels(r.Context(), task, p.Personal, p.ModelSelection)
+		if err != nil {
+			fail(w, 403, err.Error())
+			return
+		}
+		p.ModelFingerprint = learningModelsKey(models, lead)
+		if !p.Personal {
+			p.ModelSelection = learningSelectionSnapshot(task, models, lead)
+		}
+		raw, _ = json.Marshal(p)
+	}
+
+	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_jobs SET status='queued',error='',payload=$3,updated_at=now() WHERE id=$1 AND owner_id=$2 AND status='failed'`, r.PathValue("id"), userID(r.Context()), string(raw))
 	if err != nil {
 		s.dbError(w, "retry job", err)
 		return
@@ -69,14 +115,25 @@ func (s *server) retryLearningJob(w http.ResponseWriter, r *http.Request) {
 }
 
 type learningJobPayload struct {
-	PromptRevision int                `json:"prompt_revision"`
-	AttemptID      string             `json:"attempt_id"`
-	Personal       bool               `json:"personal"`
-	DocumentID     string             `json:"document_id"`
-	Chapters       []chapterSelection `json:"chapters"`
-	SenseID        int64              `json:"sense_id"`
-	Direction      string             `json:"direction"`
-	Difficulty     string             `json:"difficulty"`
+	PromptRevision   int                     `json:"prompt_revision"`
+	ModelSelection   *learningModelSelection `json:"model_selection"`
+	ModelFingerprint string                  `json:"model_fingerprint"`
+	Reason           string                  `json:"reason"`
+	AttemptID        string                  `json:"attempt_id"`
+	Personal         bool                    `json:"personal"`
+	DocumentID       string                  `json:"document_id"`
+	Chapters         []chapterSelection      `json:"chapters"`
+	SenseID          int64                   `json:"sense_id"`
+	Direction        string                  `json:"direction"`
+	Difficulty       string                  `json:"difficulty"`
+}
+
+func (s *server) learningPayloadModels(ctx context.Context, task string, p learningJobPayload) ([]aiModel, aiModel, error) {
+	models, lead, err := s.selectedLearningModels(ctx, task, p.Personal, p.ModelSelection)
+	if err == nil && p.ModelFingerprint != "" && p.ModelFingerprint != learningModelsKey(models, lead) {
+		return nil, aiModel{}, fmt.Errorf("模型配置已更新，请重新选择后重试")
+	}
+	return models, lead, err
 }
 
 func (s *server) learningWorkers(ctx context.Context) {
@@ -178,11 +235,14 @@ func (s *server) generateExplanation(ctx context.Context, p learningJobPayload) 
 	if err != nil {
 		return nil, err
 	}
-	models, _, err := s.taskModels(ctx, "explanation", p.Personal)
+	if a.Submitted == nil || (p.Reason != "self_report" && !learningExplanationNeeded(a)) {
+		return nil, fmt.Errorf("讲解仅在交卷后答错或主动求助时生成")
+	}
+	models, _, err := s.learningPayloadModels(ctx, "explanation", p)
 	if err != nil {
 		return nil, err
 	}
-	input := map[string]any{"question": a.Question.Content, "reference": a.Question.Solution, "source": sourceText(a.Question.Content), "assets": a.Question.Assets, "subject": a.Question.Subject}
+	input := map[string]any{"question": a.Question.Content, "reference": a.Question.Solution, "source": sourceText(a.Question.Content), "assets": a.Question.Assets, "subject": a.Question.Subject, "student_answer": a.Answers, "feedback": json.RawMessage(a.Feedback)}
 	raw, _ := json.Marshal(input)
 	parts := []map[string]any{textPart(string(raw))}
 	for _, asset := range a.Question.Assets {
@@ -207,7 +267,7 @@ func (s *server) generateExplanation(ctx context.Context, p learningJobPayload) 
 	if err = timeline.Validate(sourceText(a.Question.Content), assets); err != nil {
 		return nil, err
 	}
-	if _, _, err = s.taskModels(ctx, "explanation", p.Personal); err != nil {
+	if _, _, err = s.learningPayloadModels(ctx, "explanation", p); err != nil {
 		return nil, err
 	}
 	if p.PromptRevision > 0 {
@@ -251,7 +311,7 @@ func (s *server) gradeLearning(ctx context.Context, p learningJobPayload, kind s
 	raw, _ := json.Marshal(input)
 	feedback := feedbackFor(a, a.Answers)
 	if kind == "essay" {
-		models, lead, err := s.taskModels(ctx, "essay_reviewer", p.Personal)
+		models, lead, err := s.learningPayloadModels(ctx, "essay_reviewer", p)
 		if err != nil || len(models) < 2 {
 			return nil, fmt.Errorf("作文至少需要两个评审模型和一个主审")
 		}
@@ -291,6 +351,12 @@ func (s *server) gradeLearning(ctx context.Context, p learningJobPayload, kind s
 				return nil, e
 			}
 		}
+		// Reviews can take minutes: recheck grants before starting the separate lead call.
+		_, currentLead, e := s.learningPayloadModels(ctx, "essay_reviewer", p)
+		if e != nil {
+			return nil, e
+		}
+		lead = currentLead
 		input["independent_reviews"] = reviews
 		leadRaw, _ := json.Marshal(input)
 		text, err := s.learningCompletion(ctx, lead, s.taskPrompt(ctx, "essay_lead")+` 返回{"score":0,"reason":"评判理由","disagreement":"如何处理分歧","suggestions":["改进措施"]}。score为0至60。`, string(leadRaw))
@@ -304,7 +370,7 @@ func (s *server) gradeLearning(ctx context.Context, p learningJobPayload, kind s
 		if final.Score < 0 || final.Score > 60 || final.Reason == "" || final.Disagreement == "" || len(final.Suggestions) == 0 {
 			return nil, fmt.Errorf("主审无效")
 		}
-		if _, _, err = s.taskModels(ctx, "essay_reviewer", p.Personal); err != nil {
+		if _, _, err = s.learningPayloadModels(ctx, "essay_reviewer", p); err != nil {
 			return nil, err
 		}
 		feedback["score"] = final.Score
@@ -312,7 +378,7 @@ func (s *server) gradeLearning(ctx context.Context, p learningJobPayload, kind s
 		feedback["independent_reviews"] = reviews
 		feedback["essay_review"] = final
 	} else {
-		models, _, err := s.taskModels(ctx, "grading", p.Personal)
+		models, _, err := s.learningPayloadModels(ctx, "grading", p)
 		if err != nil {
 			return nil, err
 		}
@@ -344,7 +410,7 @@ func (s *server) gradeLearning(ctx context.Context, p learningJobPayload, kind s
 		}
 		feedback["score"] = score
 		feedback["ai_grading"] = result
-		if _, _, err = s.taskModels(ctx, "grading", p.Personal); err != nil {
+		if _, _, err = s.learningPayloadModels(ctx, "grading", p); err != nil {
 			return nil, err
 		}
 	}

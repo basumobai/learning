@@ -73,9 +73,11 @@ request_id 为 8–128 位字母/数字/下划线/连字符。AI 同一编号相
 | POST `/learning/attempts` | 按科目、题型、多章节范围开始练习 |
 | GET `/learning/attempts/{id}` | 本人练习、截止时间、草稿和交卷后反馈 |
 | POST `/learning/attempts/{id}/draft`、`/submit` | 截止前保存；交卷原子写入作答及主观评分任务 |
-| POST `/learning/attempts/{id}/explanation`、`/chat` | 题目到达后排队讲解；交卷后按步骤追问 |
+| POST `/learning/attempts/{id}/explanation`、`/chat` | 仅交卷后答错或主动求助时排队；按当前步骤追问 |
 | GET `/learning/jobs/{id}`、POST `/learning/jobs/{id}/retry` | 本人后台任务状态及失败重试 |
 | GET `/learning/assets/{id}` | 本人已开始练习的已发布题插图；管理员可预览草稿 |
+| GET `/learning/model-options` | 本人身份组、授权聊天模型、可用默认选择及已保存偏好 |
+| POST `/learning/model-preferences` | `{model_id,reviewer_ids,lead_model_id}`；逐项验证本组授权 |
 | GET/POST `/learning/ai-settings` | 本人API接口配置；Key不返回 |
 | POST `/learning/text-import` | multipart `file`，读取UTF-8 TXT／DOCX作文正文 |
 | POST `/learning/words/next`、`/learning/words/{id}/answer` | 4选1限时轮次，服务端判断截止 |
@@ -88,3 +90,9 @@ request_id 为 8–128 位字母/数字/下划线/连字符。AI 同一编号相
 | GET/POST `/admin/learning/cloud`、POST `/admin/learning/cloud/list`、`/import` | 管理员WebDAV配置、列目录、成对读取PDF |
 
 `normal/hard/despair` 为难度；`en_zh/zh_en` 为方向。`request_id`用于开始练习、开始词汇轮次和AI追问的幂等；作答提交/词汇选择由服务端锁定第一次有效提交。不同内容不能通过重放覆盖首次结果。新增练习题组用 `content.parts` 保存小题，`solution.answers` 按小题ID映射，选择题答案为选项ID，多选以逗号分隔。
+
+练习的 `/submit`、`/explanation`、`/chat` 可携带 `personal` 与 `model_selection:{model_id,reviewer_ids,lead_model_id}`。`model_id` 用于讲解、追问、普通主观评价；作文使用2–5个不同 `reviewer_ids` 和 `lead_model_id`。平台选择只能引用身份组授权的启用模型；个人接口使用设置页模型组合。提交作答不会因为模型不可用丢弃结果，评分错误保存在任务中。
+
+`/explanation` 的 `reason` 为 `incorrect`（默认）或 `self_report`，前者要求已确认失分，后者是学生主动求助。两种都要求已交卷；未交卷403，未判错且非主动求助409。练习响应含 `explanation_needed`，前端只在它为true时自动请求。`jobs` 包含本人该次评分和讲解任务，刷新可恢复，不重新生成。不同作答、模型或提示词版本不共用讲解。
+
+失败评分 `/jobs/{id}/retry` 可携带新的 `model_selection`/`personal`，重新验证并保存模型快照；讲解重试使用空对象保留原快照，更换讲解模型应再次请求 `/explanation`。

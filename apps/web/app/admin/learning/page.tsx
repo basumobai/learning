@@ -174,7 +174,7 @@ export default function AdminLearning() {
           </p>
         </header>
         <p>
-          <Link href="/admin">账户、服务商、模型权限组与词库导入 →</Link>
+          <Link href="/admin#groups">账户、服务商、模型权限组与词库导入 →</Link>
         </p>
         <label className="admin-reauth">
           当前管理员密码

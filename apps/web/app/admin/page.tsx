@@ -99,7 +99,14 @@ export default function Admin() {
     return data;
   }
   useEffect(() => {
-    if (auth.allowed) load().catch((e) => setError(e.message));
+    if (auth.allowed) {
+      const requested = window.location.hash.slice(1);
+      if (
+        ["providers", "groups", "users", "import", "audit"].includes(requested)
+      )
+        setTab(requested);
+      load().catch((e) => setError(e.message));
+    }
   }, [auth.allowed]);
   async function run(work: () => Promise<unknown>) {
     if (busy) return;
@@ -148,12 +155,19 @@ export default function Admin() {
       <div className="segments admin-tabs" aria-label="管理项目">
         {[
           ["providers", "服务商与模型"],
-          ["groups", "权限组"],
+          ["groups", "身份组"],
           ["users", "账户"],
           ["import", "教材词库"],
           ["audit", "操作记录"],
         ].map(([id, label]) => (
-          <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>
+          <button
+            key={id}
+            aria-pressed={tab === id}
+            onClick={() => {
+              setTab(id);
+              window.history.replaceState(null, "", `/admin#${id}`);
+            }}
+          >
             {label}
           </button>
         ))}
@@ -455,14 +469,17 @@ export default function Admin() {
       {tab === "groups" && (
         <section className="panel glass">
           <div className="panel-heading">
-            <h2>用户模型权限组</h2>
+            <h2>身份组与可用模型</h2>
             <button
               className="quiet"
               onClick={() => setGroup({ id: 0, name: "", model_ids: [] })}
             >
-              新建权限组
+              新建身份组
             </button>
           </div>
+          <p className="setting-note">
+            先添加服务商和模型，再建立身份组并勾选模型，最后到“账户”为用户分配身份组。学生可在练习页选择本组模型；作文可多选评审。
+          </p>
           <div className="segments">
             {config?.groups.map((g) => (
               <button
@@ -489,7 +506,7 @@ export default function Admin() {
             }}
           >
             <label>
-              组名称
+              身份组名称
               <input
                 value={group.name}
                 onChange={(e) => setGroup({ ...group, name: e.target.value })}
@@ -521,10 +538,10 @@ export default function Admin() {
               </div>
             </fieldset>
             <p className="setting-note">
-              未勾选的模型无法通过接口调用。管理员使用模型时也遵循自己的权限组。没有次数额度或对话数量限制。
+              学生只能选择组内启用的模型；撤销授权会阻止待执行任务与后续追问。管理员在学生练习区也遵循身份组，资料入库任务单独按管理员配置执行。没有调用次数额度。
             </p>
             <button className="primary" disabled={busy || !adminPassword}>
-              保存权限组
+              保存身份组
             </button>
           </form>
         </section>
