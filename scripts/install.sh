@@ -230,6 +230,11 @@ if (( CONFIG_ONLY )); then
 fi
 
 need curl
+pdf_directory="$(normalize_quoted "$(read_env LEARNING_PDF_DIR)")"
+pdf_directory="${pdf_directory:-${LEARNING_PDF_DIR:-./data/pdf}}"
+if [[ "$pdf_directory" == './data/pdf' ]]; then
+  mkdir -p -m 755 "$ROOT/data/pdf" || die "无法创建默认 PDF 目录 data/pdf，请检查部署目录权限。"
+fi
 docker compose config --quiet >/dev/null 2>&1 || die "Compose 配置校验失败；请核对 .env 的字段和 docs/DEPLOY.md（不要公开配置输出）。"
 # Refuse an accidental project rename when known data belongs to a different project.
 expected_volume="$(docker compose config --format json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["volumes"]["postgres_data"]["name"])' 2>/dev/null)" || die "无法识别当前 Compose 数据卷，请检查项目配置。"

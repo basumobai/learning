@@ -2,6 +2,7 @@
 # No Docker/network needed: test setup against isolated temporary fixtures.
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+REAL_INSTALLER_PATH="$PATH"
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
 mkdir -p "$WORK/scripts" "$WORK/fakebin"
@@ -73,3 +74,6 @@ cmp "$WORK/.env" "$WORK/snapshot"
 echo 'Installer checks passed: generated secrets, permissions, idempotence, invalid key rejection, Compose flow.'
 
 python3 "$ROOT/scripts/test_install_ports.py" -v
+if [[ "${GITHUB_ACTIONS:-}" == true ]] && PATH="$REAL_INSTALLER_PATH" docker info >/dev/null 2>&1; then
+  PATH="$REAL_INSTALLER_PATH" bash "$ROOT/scripts/test-install-compose.sh"
+fi

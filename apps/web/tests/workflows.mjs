@@ -37,7 +37,7 @@ try {
     .fill("new-student-password");
   await g.getByLabel("确认密码", { exact: true }).fill("different-password");
   await g.getByRole("button", { name: "创建我的账户" }).click();
-  await g.getByText("两次密码不一致", { exact: true }).waitFor();
+  await g.getByRole("alert").filter({hasText:"两次密码不一致"}).waitFor();
   assert.equal(registrations.length, 0);
   checks++;
   await g.getByLabel("确认密码", { exact: true }).fill("new-student-password");
