@@ -10,12 +10,23 @@
 | 真实安装器验收 | GitHub Actions一次性独立项目，实际执行首次安装、重复安装、升级、密码冲突/恢复、缺失配置保护；对比账号密码摘要和AI密文，等待四服务全部健康 |
 | Go与PostgreSQL17 | 迁移、账号/密文保留、HTTPS配置登录、Secure Cookie、CSRF、拒绝非法Origin/转发头绕过、自助注册/默认身份组、权限隔离、OCR进度、分阶段PDF与跨小节重复题号、听说任务结构/交卷隔离/反馈幂等和撤权 |
 | Web单元与构建 | 安全503代理、保留Origin/CSRF/Cookie、单次请求失败后恢复；现有学习/模型选择回归，TypeScript与Next.js生产构建 |
-| 浏览器 | 原有UI与多设备套件；新增注册、服务器目录导入、OCR预览、广东B问答、笔记/计时/交卷/评价及账号故障重连，覆盖390/768/1440px |
+| 浏览器 | 原有UI与多设备套件；新增注册、服务器目录导入、OCR预览、广东B问答、笔记/计时/交卷/评价及账号故障自动重连、3次上限和手动恢复，覆盖390/768/1440px |
 | Compose集成 | PostgreSQL17、Redis7、API、Web健康依赖；完整栈登录、复习、幂等、撤销与页面冒烟 |
 
 本地安装器、Go（无数据库时对应集成测试跳过）、Web单元与构建已执行。真实PostgreSQL17与Docker由GitHub Actions的隔离环境执行，不以跳过的本地测试冒充数据库验证。
 
-首轮CI：安装器、API/race、Compose均通过；Web浏览器发现新增目录面板缺少模拟API数据导致渲染失败，已补全模拟场景并加上无效响应保护。最终状态以PR最新提交的四项check为准。
+## 已执行结果
+
+2026-10-17（UTC+8），提交 `b746cdd` 的 [完整CI](https://github.com/basumobai/learning/actions/runs/38935121298) 四项全部通过：
+
+| Check | 结果 |
+| --- | --- |
+| installer | 基础Shell断言、15项隔离回归和真实Compose安装器验收通过；首次/重复/升级/故障恢复、错误密码和缺失配置保护、账号及AI密文保留、四服务全部健康 |
+| api | Go race、真实PostgreSQL17集成、Codex runner测试、vet与构建通过；数据库测试未跳过 |
+| web | 17项单元测试、TypeScript和Next.js生产构建通过；34项原有UI、398项设备、37项新增流程检查，共469项浏览器检查通过 |
+| integration | 完整Docker Compose启动、就绪探测和登录/学习流程冒烟通过 |
+
+真实验收曾识别出容器内回环TCP走免密规则会误判密码，已改用Compose网络地址验证，并用错误密码场景验证安全拦截。最终提交状态可在PR的Checks中复核。
 
 ## 复核命令
 
