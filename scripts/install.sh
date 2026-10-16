@@ -88,6 +88,11 @@ admin_password="$(normalize_quoted "$(read_env ELS_ADMIN_PASSWORD)")"
 encryption_key="$(normalize_quoted "$(read_env APP_ENCRYPTION_KEY)")"
 [[ "$db_password" =~ ^[a-zA-Z0-9_-]{16,}$ ]] ||
   die "POSTGRES_PASSWORD 应至少 16 位，且仅使用英文、数字、_、-（用于数据库 URL）。"
+case "$db_password" in
+  replace-with-a-long-alphanumeric-password|change-this-database-password|els_local_only)
+    die "POSTGRES_PASSWORD 仍是示例或开发默认值，请改为独立的随机密码。"
+    ;;
+esac
 (( ${#admin_password} >= 15 && ${#admin_password} <= 128 )) ||
   die "ELS_ADMIN_PASSWORD 必须为 15–128 个字符。"
 if ! key_bytes="$(printf '%s' "$encryption_key" | openssl base64 -d -A 2>/dev/null | wc -c | tr -d '[:space:]')"; then
