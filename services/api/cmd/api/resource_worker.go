@@ -137,7 +137,7 @@ func (s *server) learningWorkers(ctx context.Context) {
 		}()
 	}
 
-	for _, queue := range []string{"interactive", "resource", "resource", "download"} {
+	for _, queue := range []string{"interactive", "resource", "resource", "resource", "resource", "resource", "resource", "resource", "resource", "download"} {
 		go func(queue string) {
 			timer := time.NewTicker(2 * time.Second)
 			defer timer.Stop()
@@ -177,11 +177,33 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 	var raw []byte
 	var generation, resourceRevision, attempts, maximum int
 	var pause, cancelled bool
-	err := s.db.QueryRowContext(parent, `UPDATE learning_jobs SET status='running',generation=generation+1,attempts=attempts+1,lease_owner=$2,lease_until=now()+interval '90 seconds',heartbeat_at=now(),updated_at=now()
+	claim, err := s.db.BeginTx(parent, nil)
+	if err != nil {
+		return err
+	}
+	defer claim.Rollback()
+	if _, err = claim.ExecContext(parent, `SELECT pg_advisory_xact_lock(783219)`); err != nil {
+		return err
+	}
+	if queue == "resource" {
+		var running, maximum int
+		err = claim.QueryRowContext(parent, `SELECT (SELECT count(*) FROM learning_jobs WHERE queue='resource' AND status IN ('running','pause_requested','cancel_requested') AND lease_until>now()),(config->>'worker_concurrency')::integer FROM learning_processing_config WHERE id`).Scan(&running, &maximum)
+		if err != nil {
+			return err
+		}
+		if running >= maximum {
+			return sql.ErrNoRows
+		}
+	}
+	err = claim.QueryRowContext(parent, `UPDATE learning_jobs SET status='running',generation=generation+1,attempts=attempts+1,lease_owner=$2,lease_until=now()+interval '90 seconds',heartbeat_at=now(),updated_at=now()
  WHERE id=(SELECT id FROM learning_jobs WHERE ($1='' OR queue=$1) AND
  ((status IN ('queued','retry_wait') AND retry_at<=now()) OR (status IN ('running','cancel_requested','pause_requested') AND COALESCE(lease_until,updated_at+interval '12 minutes')<now()))
  ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
  RETURNING id,owner_id,kind,payload,generation,COALESCE(resource_id,''),COALESCE(resource_revision,0),pause_requested,cancel_requested,attempts,max_attempts`, queue, processWorkerID).Scan(&id, &owner, &kind, &raw, &generation, &resource, &resourceRevision, &pause, &cancelled, &attempts, &maximum)
+	if err == nil {
+		err = claim.Commit()
+	}
+
 	if err != nil {
 		return err
 	}
@@ -291,6 +313,8 @@ func (s *server) runResourceJob(ctx context.Context, kind string, raw []byte) (a
 		return s.scanResources(ctx, raw)
 	case "resource_classify":
 		return s.classifyResource(ctx, raw)
+	case "resource_deep":
+		return s.deepAnalyzeResource(ctx, raw)
 	}
 	return nil, fmt.Errorf("该处理策略尚未启用")
 }

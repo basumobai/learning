@@ -105,10 +105,20 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 	}
 	budget, _ := ctx.Value(processingBudgetKey{}).(*processingBudget)
 	if budget != nil {
-		if err := budget.reserveTokens(bound + p.Output); err != nil {
+		if lease, ok := ctx.Value(jobLeaseKey{}).(jobLease); ok {
+			result, err := s.db.ExecContext(ctx, `UPDATE learning_jobs SET ai_token_reserved=ai_token_reserved+$3 WHERE id=$1 AND generation=$2 AND status='running' AND NOT cancel_requested AND NOT pause_requested AND ai_token_reserved+$3<=$4`, lease.ID, lease.Generation, bound+p.Output, budget.Tokens)
+			if err != nil {
+				return bound, err
+			}
+			n, _ := result.RowsAffected()
+			if n != 1 {
+				return bound, fmt.Errorf("累计AI token预留达到任务预算或任务已停止")
+			}
+		} else if err := budget.reserveTokens(bound + p.Output); err != nil {
 			return bound, err
 		}
 	}
+
 	if p.Cost == nil && (budget == nil || budget.Cost == nil) {
 		return bound, nil
 	}
@@ -135,10 +145,20 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 		return bound, fmt.Errorf("预计费用超过单次任务预算")
 	}
 	if budget != nil && budget.Cost != nil {
-		if err := budget.reserveCost(cost); err != nil {
+		if lease, ok := ctx.Value(jobLeaseKey{}).(jobLease); ok {
+			result, err := s.db.ExecContext(ctx, `UPDATE learning_jobs SET ai_cost_reserved=ai_cost_reserved+$3 WHERE id=$1 AND generation=$2 AND status='running' AND NOT cancel_requested AND NOT pause_requested AND ai_cost_reserved+$3<=$4`, lease.ID, lease.Generation, cost, *budget.Cost)
+			if err != nil {
+				return bound, err
+			}
+			n, _ := result.RowsAffected()
+			if n != 1 {
+				return bound, fmt.Errorf("累计AI费用预留达到任务预算或任务已停止")
+			}
+		} else if err := budget.reserveCost(cost); err != nil {
 			return bound, err
 		}
 	}
+
 	return bound, nil
 }
 func (s *server) routedLearningCompletion(ctx context.Context, m aiModel, prompt string, content any) (string, error) {
