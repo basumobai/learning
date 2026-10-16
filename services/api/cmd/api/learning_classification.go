@@ -111,7 +111,7 @@ func (s *server) identifyPDF(ctx context.Context, id string) (any, error) {
 	}
 	out.EditionConflict = out.Subject == "english" && out.SourceKind != "exam" && otherEnglishEdition(out.Edition)
 	raw, _ := json.Marshal(out)
-	_, err = s.db.ExecContext(ctx, `UPDATE learning_documents SET recognition=$2 WHERE id=$1 AND NOT scope_confirmed`, id, string(raw))
+	_, err = s.learningExec(ctx, `UPDATE learning_documents SET recognition=$2 WHERE id=$1 AND NOT scope_confirmed`, id, string(raw))
 	return out, err
 }
 

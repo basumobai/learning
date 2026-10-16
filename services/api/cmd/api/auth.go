@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"net"
 	"net/http"
 	"net/url"
@@ -59,7 +60,19 @@ func configure(db *sql.DB) (*server, error) {
 			return nil, fmt.Errorf("APP_ENCRYPTION_KEY must be a base64 32-byte key")
 		}
 	}
-	return &server{db: db, origin: u.Scheme + "://" + u.Host, secureCookie: u.Scheme == "https", encryptionKey: key, client: newProviderClient()}, nil
+	result := &server{db: db, origin: u.Scheme + "://" + u.Host, secureCookie: u.Scheme == "https", encryptionKey: key, client: newProviderClient()}
+	if target := os.Getenv("REDIS_URL"); target != "" {
+		options, e := redis.ParseURL(target)
+		if e != nil {
+			return nil, fmt.Errorf("REDIS_URL invalid")
+		}
+		options.DialTimeout = time.Second
+		options.ReadTimeout = time.Second
+		options.WriteTimeout = time.Second
+		options.MaxRetries = 0
+		result.redis = redis.NewClient(options)
+	}
+	return result, nil
 }
 func (s *server) bootstrap(ctx context.Context) error {
 	var exists bool

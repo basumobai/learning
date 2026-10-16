@@ -155,8 +155,8 @@ func TestPDFClassificationRequiresScopeConfirmation(t *testing.T) {
 	admin.call("POST", "/api/v1/admin/learning/local-import", input, 400)
 	input["textbook"] = platform.EnglishEdition
 	manual := admin.call("POST", "/api/v1/admin/learning/local-import", input, 202)
-	if err = s.db.QueryRow(`SELECT scope_confirmed FROM learning_documents WHERE id=$1`, rawString(manual, "id")).Scan(&confirmed); err != nil || confirmed {
-		t.Fatal("manual hints bypassed scope confirmation", err)
+	if err = s.db.QueryRow(`SELECT scope_confirmed FROM learning_documents WHERE id=$1`, rawString(manual, "id")).Scan(&confirmed); err != nil || !confirmed || rawString(manual, "id") != id {
+		t.Fatal("duplicate import overwrote confirmed metadata", err)
 	}
 }
 

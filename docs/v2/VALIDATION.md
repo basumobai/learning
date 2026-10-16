@@ -35,3 +35,12 @@ local checks, CI with PostgreSQL/Compose, and integrations requiring real accoun
   included in CI; no production account was modified.
 
 P1 CI with PostgreSQL 17, race tests, browser mocks and complete Compose passed: https://github.com/basumobai/learning/actions/runs/38948876823 .
+
+## P3：资源状态、原件与任务
+
+- 单PDF和旧双PDF入口共享内容哈希去重；原件使用不可变blob，来源独立保留；旧PDF字段仍可读取。
+- 新工作台提供A/B/C/正式库阶段、筛选、分页、上传、增量扫描、人工多维分类与任务控制。独立专题无需教材Unit。
+- Worker独立Compose服务；PostgreSQL租约/代次与Redis通知配合。Redis不可用时数据库轮询恢复；暂停、取消和旧代次写入校验覆盖中间写入。
+- 新增数据库测试：去重/原件不可改删、无教材专题、权限与版本冲突、暂停恢复、过期租约重领、重复扫描。
+- 本地Go编译/无数据库测试、前端17项单元测试及Next生产构建通过。数据库与浏览器结果以本阶段远程CI为准。
+- P2远程CI：API数据库、安装器和Compose通过；浏览器脚本遗留重复密码框断言已在P3修正。
