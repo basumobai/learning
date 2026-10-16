@@ -28,7 +28,7 @@
 | R08 | [khoj-ai/khoj](https://github.com/khoj-ai/khoj) | [AGPL-3.0](https://github.com/khoj-ai/khoj/blob/master/LICENSE) | 文档语义检索、个人上下文与 AI 问答 | **只参考产品方向**，独立实现 |
 | R09 | [oppia/oppia](https://github.com/oppia/oppia) | [Apache-2.0](https://github.com/oppia/oppia/blob/develop/LICENSE) | 分支教学、通过学生回应决定下一步讲解 | 本阶段**只参考交互理念**，不复制代码 |
 | R10a | [ankitects/anki](https://github.com/ankitects/anki) | GitHub 未给出统一 MIT 标识；以源文件授权为准 | 主动回忆、成熟复习操作 | **只参考产品体验** |
-| R10b | [ankidroid/Anki-Android](https://github.com/ankidroid/Anki-Android) | [GPL-3.0](https://github.com/ankidroid/Anki-Android/blob/main/LICENSE) | 安卓记忆体验与撤销流程 | **不复制代码或布局素材** |
+| R10b | [ankidroid/Anki-Android](https://github.com/ankidroid/Anki-Android) | [GPL-3.0](https://github.com/ankidroid/Anki-Android/blob/main/COPYING) | 安卓记忆体验与撤销流程 | **不复制代码或布局素材** |
 | R11 | [CaviraOSS/PageLM](https://github.com/CaviraOSS/PageLM) | [PageLM Community License](https://github.com/CaviraOSS/PageLM/blob/main/LICENSE.md)，**非标准开源且含非商用、禁止再分发条款** | 文档 → 习题/闪卡/播客的产品构想 | **禁止复制代码/片段/UI/示例资源**；仅独立设计 |
 | R12a | [classroomio/classroomio](https://github.com/classroomio/classroomio) | [AGPL-3.0](https://github.com/classroomio/classroomio) | AI 课程生成、学习任务和机构级后台 | 设计参考 |
 | R12b | [moodle/moodle](https://github.com/moodle/moodle) | [GPL-3.0](https://github.com/moodle/moodle) | 成熟 LMS 测试、测验结构与教学管理 | 设计参考 |
