@@ -20,6 +20,7 @@ func (s *server) learningRoutes(m *http.ServeMux) {
 	s.mistakeRoutes(m)
 	s.planningRoutes(m)
 	s.englishInteractionRoutes(m)
+	s.tutorRoutes(m)
 	m.HandleFunc("GET /api/v1/learning/catalog", s.learningCatalog)
 	m.HandleFunc("POST /api/v1/learning/attempts", s.startLearningAttempt)
 	m.HandleFunc("GET /api/v1/learning/attempts/{id}", s.getLearningAttempt)

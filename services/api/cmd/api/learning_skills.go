@@ -264,7 +264,7 @@ func rebuildSkillStates(ctx context.Context, tx *sql.Tx, uid string) error {
  count(*) FILTER(WHERE evidence_kind='repeat'),count(*) FILTER(WHERE evidence_kind='assisted'),
  count(DISTINCT question_id) FILTER(WHERE evidence_kind='transfer' AND NOT ambiguous AND role IN ('primary','application')),
  count(DISTINCT question_id) FILTER(WHERE evidence_kind='transfer' AND correct AND NOT ambiguous AND role IN ('primary','application')),
- 'limited',$2,max(created_at) FROM learning_skill_evidence se WHERE user_id=$1 AND NOT EXISTS(
+ 'limited',$2,max(created_at) FROM learning_skill_evidence se WHERE user_id=$1 AND NOT EXISTS(SELECT 1 FROM learning_score_evidence newer WHERE newer.supersedes_id=se.score_evidence_id) AND NOT EXISTS(
  SELECT 1 FROM learning_mistake_events me WHERE me.attempt_id=se.attempt_id AND me.type_id='input_error' AND me.action IN ('confirm','correct') AND me.version=(SELECT max(version) FROM learning_mistake_events WHERE attempt_id=se.attempt_id AND action<>'understood')) GROUP BY user_id,skill_id
  ON CONFLICT(user_id,skill_id) DO UPDATE SET independent_count=EXCLUDED.independent_count,independent_correct=EXCLUDED.independent_correct,repeat_count=EXCLUDED.repeat_count,assisted_count=EXCLUDED.assisted_count,transfer_count=EXCLUDED.transfer_count,transfer_correct=EXCLUDED.transfer_correct,tracker_version=EXCLUDED.tracker_version,last_evidence_at=EXCLUDED.last_evidence_at,recomputed_at=now()`, uid, trackerVersion)
 	if err == nil {
