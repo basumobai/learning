@@ -11,7 +11,7 @@ export type Model = {
   id: number;
   name: string;
   model_id: string;
-  kind: "chat" | "tts";
+  kind: "chat" | "tts" | "asr";
   voices: string[];
   provider: string;
 };

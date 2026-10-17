@@ -122,7 +122,7 @@ export function ModelScopeSelector({
                 <span>
                   <strong>{model.name}</strong>
                   <small>{model.model_id}</small>
-                  <small>{model.kind === "tts" ? "语音" : "聊天"}{disabled ? " · 已停用（仅可撤销）" : ""}</small>
+                  <small>{model.kind === "asr" ? "转写" : model.kind === "tts" ? "语音" : "聊天"}{disabled ? " · 已停用（仅可撤销）" : ""}</small>
                 </span>
               </label>
             );

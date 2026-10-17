@@ -30,6 +30,7 @@ services:
     environment: &api_environment
       REDIS_URL: redis://redis:6379/0
       LEARNING_EMBEDDED_WORKER: "false"
+      LEARNING_V3_EXAMS: ${LEARNING_V3_EXAMS:-false}
       LEARNING_V3_TUTOR: ${LEARNING_V3_TUTOR:-false}
       LEARNING_V3_QUALITY_GATE: ${LEARNING_V3_QUALITY_GATE:-false}
       LEARNING_V3_PLANNING: ${LEARNING_V3_PLANNING:-false}

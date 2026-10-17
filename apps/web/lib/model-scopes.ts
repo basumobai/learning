@@ -2,14 +2,14 @@ export type ScopeModel = {
   id: number;
   name: string;
   model_id: string;
-  kind: "chat" | "tts";
+  kind: "chat" | "tts" | "asr";
   provider_id?: string;
   provider?: string;
   enabled?: boolean;
 };
 export type ScopeFilters = {
   query: string;
-  kind: "all" | "chat" | "tts";
+  kind: "all" | "chat" | "tts" | "asr";
   provider: string;
   selectedOnly: boolean;
 };

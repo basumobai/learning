@@ -19,7 +19,7 @@ type ConfigModel = {
   provider_id: string;
   model_id: string;
   name: string;
-  kind: "chat" | "tts";
+  kind: "chat" | "tts" | "asr";
   voices: string[];
   instructions: string;
   json_mode: boolean;
@@ -355,7 +355,7 @@ export default function Admin() {
                   <select
                     value={model.kind}
                     onChange={(e) => {
-                      const kind = e.target.value as "chat" | "tts";
+                      const kind = e.target.value as "chat" | "tts" | "asr";
                       setModel({
                         ...model,
                         kind,
@@ -373,6 +373,7 @@ export default function Admin() {
                     {" "}
                     <option value="chat">聊天 / 句子 / 听力出题</option>
                     <option value="tts">自然语音 / 听音拼写</option>
+                    <option value="asr">语音转写 ASR</option>
                   </select>
                 </label>
                 <label>

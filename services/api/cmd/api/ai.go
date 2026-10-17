@@ -104,6 +104,13 @@ func (s *server) beginAI(ctx context.Context, requestID, kind, conversation stri
 		return nil, 0, err
 	}
 	defer tx.Rollback()
+	var examOpen bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM learning_exam_sessions WHERE user_id=$1 AND submitted_at IS NULL)`, userID(ctx)).Scan(&examOpen); err != nil {
+		return nil, 0, err
+	}
+	if examOpen {
+		return nil, 409, nil
+	}
 	if conversation != "" {
 		var owner string
 		err = tx.QueryRowContext(ctx, `SELECT user_id FROM ai_conversations WHERE id=$1 AND user_id=$2 FOR UPDATE`, conversation, userID(ctx)).Scan(&owner)

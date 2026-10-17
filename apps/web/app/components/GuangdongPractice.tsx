@@ -1,4 +1,5 @@
 "use client";
+import { SpeechTranscription } from "./SpeechTranscription";
 import { useEffect, useRef, useState } from "react";
 import { api, requestID } from "../../lib/api";
 import { AudioOutput, useSpeech, useVoice, VoicePicker } from "../speech";
@@ -326,8 +327,9 @@ export function GuangdongPractice({
         </button>
       )}
       <p className="setting-note">
-        录音仅在当前页面本机回放，离开前可下载。AI只评价填写的文字；语音转写和专业发音评分尚未接入。
+        录音可在本机回放和下载；选择保存并转写后才上传。转写需核对，专业发音评分尚未接入。
       </p>
+      {!lesson.submitted && <SpeechTranscription trainingId={lesson.id} taskIndex={step} recordingURL={recordings[step]?.url} onTranscript={text=>setResponses(v=>v.map((old,i)=>i===step?text:old))}/>}
       {!lesson.submitted ? (
         <button
           className="primary"

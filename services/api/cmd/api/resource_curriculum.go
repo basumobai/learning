@@ -14,6 +14,8 @@ import (
 )
 
 type examRule struct {
+	Seconds  *int              `json:"duration_seconds,omitempty"`
+	Total    *float64          `json:"total_points,omitempty"`
 	ID       string            `json:"id"`
 	Family   string            `json:"family"`
 	Revision int               `json:"revision"`
@@ -210,6 +212,10 @@ func (s *server) saveResourceChapter(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]string{"id": in.ID})
 }
 func (in examRule) validate() error {
+	if (in.Seconds == nil) != (in.Total == nil) || (in.Seconds != nil && (*in.Seconds < 30 || *in.Seconds > 21600 || *in.Total <= 0 || *in.Total > 1000)) {
+		return fmt.Errorf("整卷时限和总分必须一起核验")
+	}
+
 	if len(platform.Types(in.Subject)) == 0 || in.Region == "" || len(in.Region) > 50 || in.Category == "" || len(in.Category) > 80 || in.Paper == "" || len(in.Paper) > 200 || in.From < 1977 || in.To < in.From || in.To > 2100 || len(in.Sections) < 1 || len(in.Sections) > 30 || len(in.Sources) < 1 || len(in.Sources) > 10 || len(in.Notes) > 3000 {
 		return fmt.Errorf("考试规则字段无效")
 	}
@@ -276,7 +282,7 @@ func (s *server) saveExamRule(w http.ResponseWriter, r *http.Request) {
 
 	in.ID = security.Token(18)
 	in.Revision++
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_exam_rules(id,family,revision,subject_id,region,category,paper,year_from,year_to,sections,sources,notes,verified,reviewer_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, in.ID, in.Family, in.Revision, in.Subject, in.Region, in.Category, in.Paper, in.From, in.To, nullableJSON(in.Sections), nullableJSON(in.Sources), in.Notes, in.Verified, userID(r.Context()))
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_exam_rules(id,family,revision,subject_id,region,category,paper,year_from,year_to,sections,sources,notes,verified,reviewer_id,duration_seconds,total_points) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, in.ID, in.Family, in.Revision, in.Subject, in.Region, in.Category, in.Paper, in.From, in.To, nullableJSON(in.Sections), nullableJSON(in.Sources), in.Notes, in.Verified, userID(r.Context()), in.Seconds, in.Total)
 	if err == nil {
 		err = audit(tx, r, "create_exam_rule_revision", in.ID)
 	}

@@ -169,7 +169,11 @@ func (s *server) protect(next http.Handler) http.Handler {
 			s.dbError(w, "session activity", err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, user)))
+		protectedRequest := r.WithContext(context.WithValue(r.Context(), identityKey{}, user))
+		if !s.examAccess(w, protectedRequest) {
+			return
+		}
+		next.ServeHTTP(w, protectedRequest)
 	})
 }
 func (s *server) cookie(w http.ResponseWriter, token string) {

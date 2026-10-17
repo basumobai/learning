@@ -229,7 +229,7 @@ func (s *server) selectCatalogModels(w http.ResponseWriter, r *http.Request) {
 	if in.Kind == "" {
 		in.Kind = "chat"
 	}
-	if in.Kind != "chat" && in.Kind != "tts" {
+	if in.Kind != "chat" && in.Kind != "tts" && in.Kind != "asr" {
 		fail(w, 400, "模型用途无效")
 		return
 	}

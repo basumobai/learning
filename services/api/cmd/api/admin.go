@@ -127,7 +127,7 @@ func (s *server) saveModel(w http.ResponseWriter, r *http.Request) {
 		Enabled      bool     `json:"enabled"`
 		Password     string   `json:"admin_password"`
 	}
-	if decodeLimit(r, &input, 16384) != nil || !modelSlug.MatchString(input.ModelID) || strings.TrimSpace(input.Name) == "" || len(input.Name) > 100 || (input.Kind != "chat" && input.Kind != "tts") || len(input.Voices) > 100 || len(input.Instructions) > 1000 {
+	if decodeLimit(r, &input, 16384) != nil || !modelSlug.MatchString(input.ModelID) || strings.TrimSpace(input.Name) == "" || len(input.Name) > 100 || (input.Kind != "chat" && input.Kind != "tts" && input.Kind != "asr") || len(input.Voices) > 100 || len(input.Instructions) > 1000 {
 		fail(w, 400, "模型配置无效")
 		return
 	}
