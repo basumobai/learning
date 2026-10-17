@@ -72,6 +72,42 @@ server {
 
 来源校验使用配置中的唯一公开源地址，并保留浏览器 `Origin`。Host和转发头用于路由，不扩大允许的来源范围；后端不根据任意转发头决定Cookie的Secure属性。HTTPS使用 `__Host-`、Secure、HttpOnly、SameSite=Strict会话Cookie，写操作继续需要CSRF Token。不配置通配CORS、不关闭来源验证。
 
+
+## 管理后台刷新后显示旧版：Nginx 代理缓存
+
+曾出现过同一网站的正常 \`/admin\` 返回旧版预渲染页面，而 \`/admin?v=...\` 返回新版的情况。Cloudflare 的 \`cf-cache-status: DYNAMIC\` 和清除 Cloudflare 缓存都不能排除**源站 Nginx 继承的 proxy_cache**。已验证有效的修复是在 Learning 专属的 \`location /\` 中关闭代理缓存：
+
+\`\`\`nginx
+location / {
+    proxy_cache off;
+    proxy_cache_bypass 1;
+    proxy_no_cache 1;
+    proxy_pass http://127.0.0.1:9090;
+    # 其他代理请求头保持原样
+}
+\`\`\`
+
+宝塔环境可运行仓库脚本（默认只检查，不修改）：
+
+\`\`\`bash
+bash scripts/configure-nginx-cache.sh
+sudo bash scripts/configure-nginx-cache.sh --apply
+\`\`\`
+
+脚本仅修改 \`www.sumobai.com\` 的专用反向代理配置，首先备份，然后执行 Nginx 语法检测并热重载。实际文件名不同可传 \`--file /www/server/panel/vhost/nginx/proxy/www.sumobai.com/对应配置.conf\`；若 Nginx 安装位置不同，请参照上述规则手工配置。不应清除全局代理缓存或 Docker 数据卷，也不要改动其他站点。
+
+更新后请以 GET 分别验证普通地址和带参数地址：
+
+\`\`\`bash
+for url in 'https://www.sumobai.com/admin' 'https://www.sumobai.com/admin?v=version-check'; do
+  echo "===== $url ====="
+  curl -sk -D - -o /dev/null "$url" |
+    grep -iE 'HTTP/|cache-control|x-nextjs-cache|x-nextjs-prerender|cf-cache-status'
+done
+\`\`\`
+
+两个 URL 均应返回后台的 \`private, no-store\` 缓存策略，不应再看到旧版 \`x-nextjs-cache: HIT\` 与 \`s-maxage=31536000\`。带文件哈希的 \`/_next/static/*\` 资源仍可长期缓存。
+
 ## 数据库密码冲突与缺失配置
 
 `pg_isready` 只能证明数据库进程可连接，不能验证密码。官方镜像的容器内本机TCP也可能免密；安装器用 `.env` 密码经Compose网络地址 `postgres` 执行 `SELECT 1`，避免本机信任规则造成误判。失败即停止，不重建卷、不自动执行 `ALTER ROLE`。
