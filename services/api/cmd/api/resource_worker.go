@@ -283,6 +283,8 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 			default:
 				result, err = s.runResourceJob(ctx, kind, raw)
 			}
+		case "diagnosis":
+			result, err = s.generateDiagnosis(ctx, p)
 		case "explanation":
 			result, err = s.generateExplanation(ctx, p)
 		case "grade", "essay":

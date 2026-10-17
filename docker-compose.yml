@@ -30,6 +30,7 @@ services:
     environment: &api_environment
       REDIS_URL: redis://redis:6379/0
       LEARNING_EMBEDDED_WORKER: "false"
+      LEARNING_V3_MISTAKES: ${LEARNING_V3_MISTAKES:-false}
       LEARNING_V3_SKILLS: ${LEARNING_V3_SKILLS:-false}
       LEARNING_V3_SCORING: ${LEARNING_V3_SCORING:-false}
       DATABASE_URL: postgres://els:${POSTGRES_PASSWORD:-els_local_only}@postgres:5432/els?sslmode=disable

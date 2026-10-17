@@ -212,6 +212,7 @@ export async function installMockAPI(context, options = {}) {
     else if (p.endsWith("/chat"))
       data = { answer: "先看helped的主语，再暂时遮住that从句。" };
     else if (p === "/learning/attempts/attempt1") data = attempt();
+    else if (p === "/learning/attempts/attempt1/mistakes") data = {types:[{id:"sentence_core",name:"句子主干"}],candidates:[],events:[]};
     else if (p === "/learning/words/next") {
       round++;
       difficulty = body.difficulty;
