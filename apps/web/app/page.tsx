@@ -57,6 +57,7 @@ export default function LearningHome() {
           ))}
         </section>
         <section className="learning-shortcuts">
+ <Link className="panel glass" href="/progress"><span className="eyebrow">今天与下一步</span><h2>计划、错题与学习证据</h2><p>独立首答、提示和新题验证分别回看。</p><span>查看下一步 →</span></Link>
           <Link className="panel glass" href="/english">
             <span className="eyebrow">ENGLISH · 每日积累</span>
             <h2>单词，记得更牢。</h2>
