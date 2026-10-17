@@ -15,7 +15,7 @@ Learning installer (run from any directory)
   bash scripts/install.sh                 Generate .env if absent and start Docker Compose
   bash scripts/install.sh --config-only   Generate/validate .env without starting Docker
   bash scripts/install.sh --origin https://www.sumobai.com
-  bash scripts/install.sh --update        Upgrade an existing configured installation
+  bash scripts/install.sh --update        Rebuild Web without Docker layer cache and refresh running app
   bash scripts/install.sh --recover       Check credentials before restarting services
   bash scripts/install.sh --help          Show this help
 
@@ -268,7 +268,17 @@ if ! printf '%s\n' "$db_password" | docker compose exec -T postgres sh -c 'IFS= 
   die "数据库认证检查失败（密码不一致、数据库缺失或 TCP 认证配置异常）。未重建数据库或轮换密钥。先恢复原 .env；如需人工同步密码，运行 docker compose exec postgres psql -U els -d els，再使用交互式 \\password els，详见 docs/DEPLOY.md。"
 fi
 unset db_password
+# A normal --build can reuse old Next.js build layers. On an explicit update,
+# rebuild only the stateless Web image from scratch; never purge Redis, PostgreSQL,
+# uploaded PDFs, authentication sessions or shared Docker caches.
+if [[ "$MODE" == update ]]; then
+  printf '更新模式：无缓存重建 Web 前端（不清除用户数据、数据库和 Redis）。\\n'
+  docker compose build --no-cache web || die "Web 无缓存构建失败；原有数据库和运行容器保留。"
+fi
 docker compose up --build -d || die "启动失败。使用 docker compose ps 和 docker compose logs --tail=100 查看原因。"
+if [[ "$MODE" == update ]]; then
+  docker compose up -d --no-deps --force-recreate web || die "新版 Web 容器重建失败；请检查 docker compose logs web。"
+fi
 
 healthy=0
 for (( attempt=1; attempt<=45; attempt++ )); do
@@ -283,6 +293,16 @@ if (( ! healthy )); then
   docker compose ps
   printf '启动后健康检查未通过，请运行 docker compose logs --tail=100。数据库卷与密钥未被重置。\n' >&2
   exit 1
+fi
+
+if [[ "$MODE" == update ]]; then
+  # Show the exact Git revision and on-disk Next.js build identifier for diagnosis.
+  revision="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+  printf '已部署 Git 版本：%s\\n' "$revision"
+  docker compose exec -T web sh -c 'test -s /app/.next/BUILD_ID && printf "Next.js BUILD_ID: " && cat /app/.next/BUILD_ID && echo' ||
+    printf '注意：无法读取 Next.js BUILD_ID，请检查 Web 构建日志。\\n' >&2
+  printf '已重新创建 Web 容器。管理页面应使用 no-store，静态资源继续使用文件哈希缓存。\\n'
+  printf '若公网仍显示旧版，请核实 HTTPS 反向代理是否指向当前 Web 端口；Cloudflare/CDN 缓存必须从对应服务端单独清除。\\n'
 fi
 
 printf '\n安装完成！本机访问：http://localhost:%s\n' "$web_port"
