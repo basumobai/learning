@@ -254,13 +254,18 @@ func applySkillEvidence(ctx context.Context, tx *sql.Tx, scoreID string) error {
 	return rebuildSkillStates(ctx, tx, uid)
 }
 func rebuildSkillStates(ctx context.Context, tx *sql.Tx, uid string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO learning_user_skill_states(user_id,skill_id,independent_count,independent_correct,repeat_count,assisted_count,transfer_count,transfer_correct,state,tracker_version,last_evidence_at)
+	_, err := tx.ExecContext(ctx, `UPDATE learning_user_skill_states SET independent_count=0,independent_correct=0,repeat_count=0,assisted_count=0,transfer_count=0,transfer_correct=0,state='limited',recomputed_at=now() WHERE user_id=$1`, uid)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO learning_user_skill_states(user_id,skill_id,independent_count,independent_correct,repeat_count,assisted_count,transfer_count,transfer_correct,state,tracker_version,last_evidence_at)
  SELECT user_id,skill_id,count(DISTINCT question_id) FILTER(WHERE evidence_kind='independent' AND NOT ambiguous AND role IN ('primary','application')),
  count(DISTINCT question_id) FILTER(WHERE evidence_kind='independent' AND correct AND NOT ambiguous AND role IN ('primary','application')),
  count(*) FILTER(WHERE evidence_kind='repeat'),count(*) FILTER(WHERE evidence_kind='assisted'),
  count(DISTINCT question_id) FILTER(WHERE evidence_kind='transfer' AND NOT ambiguous AND role IN ('primary','application')),
  count(DISTINCT question_id) FILTER(WHERE evidence_kind='transfer' AND correct AND NOT ambiguous AND role IN ('primary','application')),
- 'limited',$2,max(created_at) FROM learning_skill_evidence WHERE user_id=$1 GROUP BY user_id,skill_id
+ 'limited',$2,max(created_at) FROM learning_skill_evidence se WHERE user_id=$1 AND NOT EXISTS(
+ SELECT 1 FROM learning_mistake_events me WHERE me.attempt_id=se.attempt_id AND me.type_id='input_error' AND me.action IN ('confirm','correct') AND me.version=(SELECT max(version) FROM learning_mistake_events WHERE attempt_id=se.attempt_id AND action<>'understood')) GROUP BY user_id,skill_id
  ON CONFLICT(user_id,skill_id) DO UPDATE SET independent_count=EXCLUDED.independent_count,independent_correct=EXCLUDED.independent_correct,repeat_count=EXCLUDED.repeat_count,assisted_count=EXCLUDED.assisted_count,transfer_count=EXCLUDED.transfer_count,transfer_correct=EXCLUDED.transfer_correct,tracker_version=EXCLUDED.tracker_version,last_evidence_at=EXCLUDED.last_evidence_at,recomputed_at=now()`, uid, trackerVersion)
 	if err == nil {
 		_, err = tx.ExecContext(ctx, `UPDATE learning_user_skill_states SET state=CASE WHEN independent_count+transfer_count<3 THEN 'limited' WHEN independent_correct>=4 AND transfer_correct>=2 THEN 'basic' WHEN independent_correct+transfer_correct=0 THEN 'learning' ELSE 'consolidating' END WHERE user_id=$1`, uid)

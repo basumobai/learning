@@ -17,6 +17,7 @@ import (
 func (s *server) learningRoutes(m *http.ServeMux) {
 	s.scoringRoutes(m)
 	s.skillRoutes(m)
+	s.mistakeRoutes(m)
 	m.HandleFunc("GET /api/v1/learning/catalog", s.learningCatalog)
 	m.HandleFunc("POST /api/v1/learning/attempts", s.startLearningAttempt)
 	m.HandleFunc("GET /api/v1/learning/attempts/{id}", s.getLearningAttempt)

@@ -1,4 +1,5 @@
 "use client";
+import { MistakePanel } from "../components/MistakePanel";
 import { MathText } from "../components/MathText";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -795,6 +796,7 @@ export default function Practice() {
         )}
         {attempt && (
           <>
+            {submitted && <MistakePanel attemptId={attempt.id} />}
             {submitted && (
               <nav className="review-jumps" aria-label="本题复习">
                 <a href="#practice-feedback">查看作答反馈</a>
