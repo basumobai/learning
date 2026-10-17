@@ -16,6 +16,7 @@ import (
 
 func (s *server) learningRoutes(m *http.ServeMux) {
 	s.scoringRoutes(m)
+	s.skillRoutes(m)
 	m.HandleFunc("GET /api/v1/learning/catalog", s.learningCatalog)
 	m.HandleFunc("POST /api/v1/learning/attempts", s.startLearningAttempt)
 	m.HandleFunc("GET /api/v1/learning/attempts/{id}", s.getLearningAttempt)
@@ -235,7 +236,7 @@ func (s *server) startLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	if in.Subject == "chinese" && (in.Kind == "essay" || in.Kind == "poetry" || strings.Contains(in.Kind, "reading")) {
 		seconds = 1800
 	}
-	_, err = s.db.ExecContext(r.Context(), `INSERT INTO learning_attempts(id,user_id,question_id,question_revision,request_id,deadline,creation_digest,scoring_rule_revision_id) VALUES($1,$2,$3,$4,$5,CASE WHEN $6::int>0 THEN now()+make_interval(secs=>$6) END,$7,(SELECT id FROM learning_scoring_rule_revisions WHERE question_id=$3 AND question_revision=$4 AND $8 ORDER BY revision DESC LIMIT 1)) ON CONFLICT(user_id,request_id) DO NOTHING`, id, userID(r.Context()), qid, rev, in.RequestID, seconds, fingerprint, v3Enabled("SCORING"))
+	_, err = s.db.ExecContext(r.Context(), `INSERT INTO learning_attempts(id,user_id,question_id,question_revision,request_id,deadline,creation_digest,scoring_rule_revision_id,skill_link_revision_id) VALUES($1,$2,$3,$4,$5,CASE WHEN $6::int>0 THEN now()+make_interval(secs=>$6) END,$7,(SELECT id FROM learning_scoring_rule_revisions WHERE question_id=$3 AND question_revision=$4 AND $8 ORDER BY revision DESC LIMIT 1),(SELECT id FROM learning_skill_link_revisions WHERE question_id=$3 AND question_revision=$4 ORDER BY revision DESC LIMIT 1)) ON CONFLICT(user_id,request_id) DO NOTHING`, id, userID(r.Context()), qid, rev, in.RequestID, seconds, fingerprint, v3Enabled("SCORING"))
 	if err != nil {
 		s.dbError(w, "start attempt", err)
 		return
