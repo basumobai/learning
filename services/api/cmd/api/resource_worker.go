@@ -177,6 +177,9 @@ func (s *server) processLearningJob(parent context.Context) error {
 }
 func (s *server) processLearningJobQueue(parent context.Context, queue string) error {
 	if queue == "interactive" || queue == "" {
+		if err := s.expireLearningExam(parent); err != nil {
+			return err
+		}
 		if err := s.processEvidenceOutbox(parent); err != nil {
 			return err
 		}

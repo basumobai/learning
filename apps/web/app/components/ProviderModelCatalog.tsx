@@ -13,7 +13,7 @@ export function ProviderModelCatalog({ providerId, onClose, onSaved }: {provider
  const dialog=useRef<HTMLDialogElement>(null);
  const [entries,setEntries]=useState<CatalogEntry[]>([]),[selected,setSelected]=useState<string[]>([]);
  const [busy,setBusy]=useState(false),[error,setError]=useState(""),[sort,setSort]=useState("name");
- const [modality,setModality]=useState("all"),[kind,setKind]=useState<"chat"|"tts">("chat"),[voices,setVoices]=useState("");
+ const [modality,setModality]=useState("all"),[kind,setKind]=useState<"chat"|"tts"|"asr">("chat"),[voices,setVoices]=useState("");
  async function load(sync=false) {
   setBusy(true);setError("");
   try {
@@ -34,7 +34,7 @@ export function ProviderModelCatalog({ providerId, onClose, onSaved }: {provider
   <div className="catalog-filters">
    <label>排序<select value={sort} onChange={e=>setSort(e.target.value)}><option value="name">名称</option><option value="context">上下文从大到小</option><option value="price">公开输出价格从低到高</option></select></label>
    <label>输入模态<select value={modality} onChange={e=>setModality(e.target.value)}><option value="all">全部（含未知）</option><option value="text">文字</option><option value="image">图像</option><option value="audio">音频</option></select></label>
-   <label>选用用途<select value={kind} onChange={e=>setKind(e.target.value as "chat"|"tts")}><option value="chat">AI文字与图文任务</option><option value="tts">语音 TTS</option></select></label>
+   <label>选用用途<select value={kind} onChange={e=>setKind(e.target.value as "chat"|"tts"|"asr")}><option value="chat">AI文字与图文任务</option><option value="tts">语音 TTS</option><option value="asr">语音转写 ASR</option></select></label>
    {kind==="tts"&&<label>服务商支持的音色（逗号分隔）<input value={voices} onChange={e=>setVoices(e.target.value)}/></label>}
   </div>
   {busy?<p role="status">正在获取模型目录…</p>:<ModelScopeSelector models={models} selected={entries.flatMap((m,i)=>selected.includes(m.model_id)?[i+1]:[])} onChange={ids=>setSelected(entries.filter((_,i)=>ids.includes(i+1)).map(m=>m.model_id))} label="服务商模型目录"/>}

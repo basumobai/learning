@@ -11,6 +11,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, APIError, authState, setCSRF, type User } from "../lib/api";
 import { Icon, type IconName } from "./icons";
+import { OpenExamBanner } from "./components/OpenExamBanner";
 import { ViewportFrame } from "./components/ViewportFrame";
 
 const AuthContext = createContext<{
@@ -64,6 +65,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, ready, refresh }}>
       <ViewportFrame />
+      {user&&!user.must_change_password&&<OpenExamBanner userId={user.id}/>}
       {error ? (
         <main className="shell">
           <section className="panel glass" role="alert">

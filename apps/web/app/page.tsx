@@ -57,6 +57,7 @@ export default function LearningHome() {
           ))}
         </section>
         <section className="learning-shortcuts">
+ <Link className="panel glass" href="/exams"><span className="eyebrow">按年份与规则</span><h2>整卷模拟</h2><p>服务端计时、恢复草稿与考后复盘。</p><span>查看可用规则 →</span></Link>
  <Link className="panel glass" href="/progress"><span className="eyebrow">今天与下一步</span><h2>计划、错题与学习证据</h2><p>独立首答、提示和新题验证分别回看。</p><span>查看下一步 →</span></Link>
           <Link className="panel glass" href="/english">
             <span className="eyebrow">ENGLISH · 每日积累</span>

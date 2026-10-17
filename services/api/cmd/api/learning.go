@@ -21,6 +21,7 @@ func (s *server) learningRoutes(m *http.ServeMux) {
 	s.planningRoutes(m)
 	s.englishInteractionRoutes(m)
 	s.tutorRoutes(m)
+	s.examRoutes(m)
 	m.HandleFunc("GET /api/v1/learning/catalog", s.learningCatalog)
 	m.HandleFunc("POST /api/v1/learning/attempts", s.startLearningAttempt)
 	m.HandleFunc("GET /api/v1/learning/attempts/{id}", s.getLearningAttempt)
@@ -363,6 +364,15 @@ func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	}
 	if decodeLimit(r, &in, 120000) != nil || (in.ClientRequestID != "" && !requestIDPattern.MatchString(in.ClientRequestID)) {
 		fail(w, 400, "作答格式无效")
+		return
+	}
+	var inExam bool
+	if e := s.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM learning_exam_items i JOIN learning_exam_sessions e ON e.id=i.exam_id WHERE i.attempt_id=$1 AND e.user_id=$2 AND e.submitted_at IS NULL)`, r.PathValue("id"), userID(r.Context())).Scan(&inExam); e != nil {
+		s.dbError(w, "exam item guard", e)
+		return
+	}
+	if inExam {
+		fail(w, 409, "请通过整卷交卷保存评分")
 		return
 	}
 	a, err := s.loadAttempt(r.Context(), r.PathValue("id"))
