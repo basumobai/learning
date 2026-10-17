@@ -73,7 +73,7 @@ func (s *server) initLearning(ctx context.Context) error {
 			}
 		}
 	}
-	return nil
+	return s.initExamRules(ctx)
 }
 func (s *server) taskPrompt(ctx context.Context, task string) string {
 	var prompt string

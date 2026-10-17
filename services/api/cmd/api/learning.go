@@ -56,7 +56,7 @@ func (s *server) learningRoutes(m *http.ServeMux) {
 func (s *server) learningCatalog(w http.ResponseWriter, r *http.Request) {
 	subjects := []map[string]any{}
 	for _, id := range []string{"chinese", "math", "english", "physics", "chemistry", "biology"} {
-		subjects = append(subjects, map[string]any{"id": id, "types": platform.Types(id), "exam": platform.GuangdongExam(id), "curriculum": platform.Curriculum(id)})
+		subjects = append(subjects, map[string]any{"id": id, "types": platform.Types(id), "exam": s.examForYear(r.Context(), id, examYearQuery(r)), "curriculum": platform.Curriculum(id)})
 	}
 	var chapters json.RawMessage
 	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT c.*, (SELECT count(*) FROM learning_questions q WHERE q.chapter_id=c.id AND q.status='published') AS question_count FROM learning_chapters c ORDER BY subject_id,position,title) t`).Scan(&chapters)
@@ -128,7 +128,7 @@ type learningAttempt struct {
 func (s *server) loadAttempt(ctx context.Context, id string) (learningAttempt, error) {
 	a := learningAttempt{ID: id, ServerTime: time.Now()}
 	var c, sol, answers, draft, feedback []byte
-	err := s.db.QueryRowContext(ctx, `SELECT q.id,q.subject_id,q.chapter_id,q.kind,q.content,q.solution,q.revision,q.provenance,a.started_at,a.deadline,a.submitted_at,a.answers,a.draft_answers,a.feedback,a.draft_version FROM learning_attempts a JOIN learning_questions q ON q.id=a.question_id AND q.revision=a.question_revision WHERE a.id=$1 AND a.user_id=$2`, id, userID(ctx)).Scan(&a.Question.ID, &a.Question.Subject, &a.Question.Chapter, &a.Question.Kind, &c, &sol, &a.Question.Revision, &a.Question.Provenance, &a.Started, &a.Deadline, &a.Submitted, &answers, &draft, &feedback, &a.DraftVersion)
+	err := s.db.QueryRowContext(ctx, `SELECT q.question_id,q.subject_id,COALESCE(q.chapter_id,''),q.kind,q.content,q.solution,q.revision,q.provenance,a.started_at,a.deadline,a.submitted_at,a.answers,a.draft_answers,a.feedback,a.draft_version FROM learning_attempts a JOIN learning_question_revisions q ON q.question_id=a.question_id AND q.revision=a.question_revision WHERE a.id=$1 AND a.user_id=$2`, id, userID(ctx)).Scan(&a.Question.ID, &a.Question.Subject, &a.Question.Chapter, &a.Question.Kind, &c, &sol, &a.Question.Revision, &a.Question.Provenance, &a.Started, &a.Deadline, &a.Submitted, &answers, &draft, &feedback, &a.DraftVersion)
 	if err != nil {
 		return a, err
 	}
@@ -143,7 +143,7 @@ func (s *server) loadAttempt(ctx context.Context, id string) (learningAttempt, e
 	a.Feedback = feedback
 	a.ExplanationNeeded = learningExplanationNeeded(a)
 	a.Question.Assets = []map[string]any{}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,alt FROM learning_assets WHERE question_id=$1 ORDER BY id`, a.Question.ID)
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id,a.alt FROM learning_revision_assets r JOIN learning_assets a ON a.id=r.asset_id WHERE r.question_id=$1 AND r.revision=$2 ORDER BY a.id`, a.Question.ID, a.Question.Revision)
 	if err != nil {
 		return a, err
 	}
@@ -199,7 +199,7 @@ func (s *server) startLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	}
 	var qid string
 	var rev int
-	err = s.db.QueryRowContext(r.Context(), `SELECT q.id,q.revision FROM learning_questions q JOIN learning_chapters c ON c.id=q.chapter_id WHERE q.status='published' AND q.subject_id=$1 AND q.kind=$2 AND (cardinality($3::text[])=0 OR q.chapter_id=ANY($3::text[])) AND ($4='' OR c.textbook=$4) AND ($5='' OR c.term=$5) AND ($7='' OR c.edition=$7) AND ($8='' OR c.volume=$8) ORDER BY (SELECT count(*) FROM learning_attempts a WHERE a.user_id=$6 AND a.question_id=q.id),random() LIMIT 1`, in.Subject, in.Kind, in.Chapters, in.Textbook, in.Term, userID(r.Context()), in.Edition, in.Volume).Scan(&qid, &rev)
+	err = s.db.QueryRowContext(r.Context(), `SELECT q.id,q.revision FROM learning_questions q LEFT JOIN learning_chapters c ON c.id=q.chapter_id WHERE q.status='published' AND q.subject_id=$1 AND q.kind=$2 AND (cardinality($3::text[])=0 OR q.chapter_id=ANY($3::text[]) OR EXISTS(SELECT 1 FROM learning_question_chapters qc WHERE qc.question_id=q.id AND qc.chapter_id=ANY($3::text[]))) AND ($4='' OR c.textbook=$4) AND ($5='' OR c.term=$5) AND ($7='' OR c.edition=$7) AND ($8='' OR c.volume=$8) ORDER BY (SELECT count(*) FROM learning_attempts a WHERE a.user_id=$6 AND a.question_id=q.id),random() LIMIT 1`, in.Subject, in.Kind, in.Chapters, in.Textbook, in.Term, userID(r.Context()), in.Edition, in.Volume).Scan(&qid, &rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "这个范围还没有已审核题目，请管理员导入并发布")
 		return
@@ -571,7 +571,7 @@ func (s *server) questionChat(w http.ResponseWriter, r *http.Request) {
 }
 func (s *server) learningAsset(w http.ResponseWriter, r *http.Request) {
 	var image []byte
-	err := s.db.QueryRowContext(r.Context(), `SELECT a.image FROM learning_assets a JOIN learning_questions q ON q.id=a.question_id WHERE a.id=$1 AND ($2='admin' OR (q.status='published' AND EXISTS(SELECT 1 FROM learning_attempts t WHERE t.user_id=$3 AND t.question_id=q.id)))`, r.PathValue("id"), account(r.Context()).Role, userID(r.Context())).Scan(&image)
+	err := s.db.QueryRowContext(r.Context(), `SELECT a.image FROM learning_assets a WHERE a.id=$1 AND ($2='admin' OR EXISTS(SELECT 1 FROM learning_revision_assets ra JOIN learning_attempts t ON t.question_id=ra.question_id AND t.question_revision=ra.revision WHERE ra.asset_id=a.id AND t.user_id=$3))`, r.PathValue("id"), account(r.Context()).Role, userID(r.Context())).Scan(&image)
 	if err != nil {
 		fail(w, 404, "插图不存在")
 		return

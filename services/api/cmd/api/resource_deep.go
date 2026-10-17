@@ -19,29 +19,32 @@ type sourceEvidence struct {
 	Kind  string `json:"kind"`
 }
 type deepUnit struct {
-	Key            string                   `json:"source_key"`
-	Kind           string                   `json:"unit_kind"`
-	Title          string                   `json:"title"`
-	Subject        string                   `json:"subject_id"`
-	Type           string                   `json:"resource_type"`
-	QuestionType   string                   `json:"question_type"`
-	Content        platform.Content         `json:"content"`
-	Solution       platform.Solution        `json:"solution"`
-	Pages          []int                    `json:"pages"`
-	Evidence       []classificationEvidence `json:"evidence"`
-	AnswerEvidence []sourceEvidence         `json:"answer_evidence"`
-	Figures        []figureCrop             `json:"figures"`
-	Knowledge      []string                 `json:"knowledge_ids"`
-	Chapters       []string                 `json:"chapter_ids"`
-	Topics         []string                 `json:"topics"`
-	Difficulty     string                   `json:"difficulty"`
-	Confidence     float64                  `json:"confidence"`
-	Issues         []string                 `json:"needs_review"`
-	Authenticity   string                   `json:"authenticity"`
-	ExamName       string                   `json:"exam_name"`
-	ExamYear       *int                     `json:"exam_year"`
-	ExamRegion     string                   `json:"exam_region"`
-	RuleID         string                   `json:"exam_rule_id"`
+	Key                string                   `json:"source_key"`
+	Kind               string                   `json:"unit_kind"`
+	Title              string                   `json:"title"`
+	Subject            string                   `json:"subject_id"`
+	Type               string                   `json:"resource_type"`
+	QuestionType       string                   `json:"question_type"`
+	Content            platform.Content         `json:"content"`
+	Solution           platform.Solution        `json:"solution"`
+	Pages              []int                    `json:"pages"`
+	Evidence           []classificationEvidence `json:"evidence"`
+	AnswerEvidence     []sourceEvidence         `json:"answer_evidence"`
+	Figures            []figureCrop             `json:"figures"`
+	Knowledge          []string                 `json:"knowledge_ids"`
+	Chapters           []string                 `json:"chapter_ids"`
+	Topics             []string                 `json:"topics"`
+	Difficulty         string                   `json:"difficulty"`
+	Confidence         float64                  `json:"confidence"`
+	Issues             []string                 `json:"needs_review"`
+	Authenticity       string                   `json:"authenticity"`
+	ExamName           string                   `json:"exam_name"`
+	ExamYear           *int                     `json:"exam_year"`
+	ExamRegion         string                   `json:"exam_region"`
+	RuleID             string                   `json:"exam_rule_id"`
+	AnswerOrigin       string                   `json:"answer_origin"`
+	HumanAnswerNote    string                   `json:"human_answer_note"`
+	VerificationSource string                   `json:"verification_source"`
 }
 type deepReference struct {
 	Key        string            `json:"source_key"`
@@ -361,6 +364,9 @@ func (s *server) deepAnalyzeResource(ctx context.Context, payload []byte) (any, 
 					u.Solution = platform.Solution{}
 					u.Authenticity = "unverified"
 					u.AnswerEvidence = nil
+					u.AnswerOrigin = "reference"
+					u.HumanAnswerNote = ""
+					u.VerificationSource = ""
 					u.Chapters = nil
 					if u.Type == "" {
 						u.Type = resourceType
@@ -507,6 +513,7 @@ func (s *server) resolveDeepAnswers(ctx context.Context, run string) error {
 		refs.Close()
 		if len(matches) == 1 {
 			u.Solution = matches[0].Solution
+			u.AnswerOrigin = "reference"
 			u.AnswerEvidence = matches[0].Evidence
 			u.Confidence = min(u.Confidence, matches[0].Confidence)
 			if _, err = s.learningExec(ctx, `UPDATE learning_content_units SET body=$2 WHERE id=$1 AND review_status='pending' AND revision=1`, v.ID, nullableJSON(u)); err != nil {

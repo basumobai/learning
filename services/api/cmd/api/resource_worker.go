@@ -246,7 +246,7 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 	}
 	if err == nil {
 		switch kind {
-		case "identify", "outline", "ocr", "extract", "word_options", "resource_scan", "resource_classify", "resource_deep", "share_inspect", "share_analyze", "share_download":
+		case "identify", "outline", "ocr", "extract", "word_options", "resource_scan", "resource_classify", "resource_deep", "resource_publish", "share_inspect", "share_analyze", "share_download":
 			if user.Role != "admin" {
 				err = fmt.Errorf("需要管理员权限")
 				break
@@ -315,6 +315,8 @@ func (s *server) runResourceJob(ctx context.Context, kind string, raw []byte) (a
 		return s.classifyResource(ctx, raw)
 	case "resource_deep":
 		return s.deepAnalyzeResource(ctx, raw)
+	case "resource_publish":
+		return s.publishResource(ctx, raw)
 	}
 	return nil, fmt.Errorf("该处理策略尚未启用")
 }

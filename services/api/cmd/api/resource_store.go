@@ -306,7 +306,7 @@ func (s *server) editResourceTags(w http.ResponseWriter, r *http.Request) {
 	if in.Confirm {
 		state, stage = "confirmed", "B"
 	}
-	_, err = tx.ExecContext(r.Context(), `UPDATE learning_documents SET subject_id=$2,resource_type=$3,textbook_alignment=$4,edition=$5,volume=$6,classification_status=$7,stage=$8,revision=revision+1,classification_revision=classification_revision+1,updated_at=now() WHERE id=$1`, r.PathValue("id"), subject, in.Type, in.Alignment, in.Edition, in.Volume, state, stage)
+	_, err = tx.ExecContext(r.Context(), `UPDATE learning_documents SET subject_id=$2,resource_type=$3,textbook_alignment=$4,edition=$5,volume=$6,classification_status=$7,stage=CASE WHEN published_run_id IS NOT NULL THEN 'library' ELSE $8 END,revision=revision+1,classification_revision=classification_revision+1,updated_at=now() WHERE id=$1`, r.PathValue("id"), subject, in.Type, in.Alignment, in.Edition, in.Volume, state, stage)
 	if err == nil {
 		err = applyResourceTerms(r.Context(), tx, r.PathValue("id"), in)
 	}

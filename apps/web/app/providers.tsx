@@ -115,6 +115,7 @@ export function Navigation() {
           { href: "/", label: "学习", icon: "book" },
           { href: "/assistant", label: "AI 助学", icon: "sparkles" },
           { href: "/vocabulary", label: "词库", icon: "library" },
+ { href: "/resources", label: "资源", icon: "library" },
           { href: "/settings", label: "设置", icon: "settings" },
           ...(user?.role === "admin"
             ? [{ href: "/admin", label: "管理", icon: "shield" as const }]
