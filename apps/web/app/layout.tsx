@@ -3,6 +3,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
+  manifest: "/manifest.webmanifest",
+  icons:{icon:"/icon.svg"},
   title: "Learning · 广东高中学习平台",
   description: "面向广东高中的语文、数学、英语、物理、化学、生物 AI 学习平台",
 };

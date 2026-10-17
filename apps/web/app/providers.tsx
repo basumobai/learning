@@ -11,6 +11,8 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, APIError, authState, setCSRF, type User } from "../lib/api";
 import { Icon, type IconName } from "./icons";
+import { OfflineSupport } from "./components/OfflineSupport";
+import { clearPrivateData,broadcastAccountChange } from "../lib/offline";
 import { OpenExamBanner } from "./components/OpenExamBanner";
 import { ViewportFrame } from "./components/ViewportFrame";
 
@@ -65,6 +67,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, ready, refresh }}>
       <ViewportFrame />
+      <OfflineSupport />
       {user&&!user.must_change_password&&<OpenExamBanner userId={user.id}/>}
       {error ? (
         <main className="shell">
@@ -138,6 +141,7 @@ export function Navigation() {
     try {
       await api("/auth/logout", {});
     } finally {
+      await clearPrivateData();broadcastAccountChange();
       setCSRF("");
       router.replace("/login");
       window.location.assign("/login");

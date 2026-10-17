@@ -7,6 +7,7 @@ const sections = [
     { href: "/admin/resources", label: "资源处理工作台", detail: "上传 · A/B/C 区" },
     { href: "/admin/resources/jobs", label: "任务与运行状态", detail: "Worker · 重试" },
     { href: "/admin/resources/shares", label: "网盘导入", detail: "文件筛选 · 下载" },
+    { href: "/admin/engine", label: "评分与学习证据", detail: "规则 · 映射 · 质量评测" },
     { href: "/admin/resources/config", label: "教材与知识点", detail: "分类 · 预算" },
     { href: "/admin/learning", label: "旧版题库与导入", detail: "兼容功能" },
   ]},

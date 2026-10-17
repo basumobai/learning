@@ -103,6 +103,8 @@ jobs:
           done
           test "$ready" -eq 1
       - run: python3 scripts/smoke.py
+      - name: Restore backup to a fresh disposable database
+        run: bash scripts/test-backup-drill.sh
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --no-color

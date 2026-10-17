@@ -741,6 +741,7 @@ export default function AdminLearning() {
             {draft && (
               <>
                 <h3>{draft.content.text}</h3>
+                {draft.status==="published"&&<Link href={`/admin/engine?question=${draft.id}`}>配置本题评分规则与知识映射</Link>}
                 {pages(
                   draft.document_id,
                   "question",

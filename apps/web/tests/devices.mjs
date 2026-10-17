@@ -27,6 +27,8 @@ const configurations = [
   { name: "tablet-split", width: 600, height: 900, touch: true },
   { name: "navigation-boundary", width: 701, height: 900, touch: true },
   { name: "desktop", width: 1440, height: 1000, touch: false },
+  { name: "wide-desktop", width: 1920, height: 1080, touch: false },
+  { name: "large-display", width: 2560, height: 1440, touch: false },
 ];
 const pages = [
   "/",
@@ -37,6 +39,10 @@ const pages = [
   "/assistant#sentence",
   "/vocabulary",
   "/settings",
+  "/progress",
+  "/review",
+  "/exams",
+  "/admin/engine",
   "/admin",
   "/admin/learning",
 ];

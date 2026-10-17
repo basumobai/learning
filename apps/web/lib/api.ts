@@ -1,3 +1,4 @@
+import {adoptPrivateOwner,broadcastAccountChange} from "./offline";
 export type User = {
   id: string;
   username: string;
@@ -55,6 +56,7 @@ export async function authState(): Promise<{ user: User; csrf_token: string }> {
     );
   }
   csrf = data.csrf_token;
+  await adoptPrivateOwner(data.user.id);
   return data;
 }
 async function headers(
@@ -95,6 +97,7 @@ export async function api<T>(path: string, body?: object, method: "POST" | "PUT"
     }
     throw new APIError(data.error || "请求失败，请稍后重试", response.status);
   }
+  if(path==="/auth/login"||path==="/auth/register"){const state=await authState();broadcastAccountChange(state.user.id)}
   return data as T;
 }
 export async function speechBlob(path: string, body: object): Promise<Blob> {

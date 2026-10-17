@@ -22,6 +22,8 @@ func (s *server) learningRoutes(m *http.ServeMux) {
 	s.englishInteractionRoutes(m)
 	s.tutorRoutes(m)
 	s.examRoutes(m)
+	m.HandleFunc("GET /api/v1/admin/learning/operations", s.engineOperations)
+	m.HandleFunc("GET /api/v1/admin/learning/attempts/{id}/review-score", s.reviewScoreDetail)
 	m.HandleFunc("GET /api/v1/learning/catalog", s.learningCatalog)
 	m.HandleFunc("POST /api/v1/learning/attempts", s.startLearningAttempt)
 	m.HandleFunc("GET /api/v1/learning/attempts/{id}", s.getLearningAttempt)
@@ -118,6 +120,7 @@ type learningQuestion struct {
 	Provenance json.RawMessage   `json:"provenance"`
 }
 type learningAttempt struct {
+	ExamID            string            `json:"exam_session_id,omitempty"`
 	RuleID            string            `json:"scoring_rule_revision_id,omitempty"`
 	Scores            json.RawMessage   `json:"score_evidence,omitempty"`
 	DraftVersion      int64             `json:"draft_version"`
@@ -137,7 +140,7 @@ type learningAttempt struct {
 func (s *server) loadAttempt(ctx context.Context, id string) (learningAttempt, error) {
 	a := learningAttempt{ID: id, ServerTime: time.Now()}
 	var c, sol, answers, draft, feedback []byte
-	err := s.db.QueryRowContext(ctx, `SELECT q.question_id,q.subject_id,COALESCE(q.chapter_id,''),q.kind,q.content,q.solution,q.revision,q.provenance,a.started_at,a.deadline,a.submitted_at,a.answers,a.draft_answers,a.feedback,a.draft_version,COALESCE(a.scoring_rule_revision_id,'') FROM learning_attempts a JOIN learning_question_revisions q ON q.question_id=a.question_id AND q.revision=a.question_revision WHERE a.id=$1 AND a.user_id=$2`, id, userID(ctx)).Scan(&a.Question.ID, &a.Question.Subject, &a.Question.Chapter, &a.Question.Kind, &c, &sol, &a.Question.Revision, &a.Question.Provenance, &a.Started, &a.Deadline, &a.Submitted, &answers, &draft, &feedback, &a.DraftVersion, &a.RuleID)
+	err := s.db.QueryRowContext(ctx, `SELECT q.question_id,q.subject_id,COALESCE(q.chapter_id,''),q.kind,q.content,q.solution,q.revision,q.provenance,a.started_at,a.deadline,a.submitted_at,a.answers,a.draft_answers,a.feedback,a.draft_version,COALESCE(a.scoring_rule_revision_id,''),COALESCE((SELECT exam_id FROM learning_exam_items WHERE attempt_id=a.id),'') FROM learning_attempts a JOIN learning_question_revisions q ON q.question_id=a.question_id AND q.revision=a.question_revision WHERE a.id=$1 AND a.user_id=$2`, id, userID(ctx)).Scan(&a.Question.ID, &a.Question.Subject, &a.Question.Chapter, &a.Question.Kind, &c, &sol, &a.Question.Revision, &a.Question.Provenance, &a.Started, &a.Deadline, &a.Submitted, &answers, &draft, &feedback, &a.DraftVersion, &a.RuleID, &a.ExamID)
 	if err != nil {
 		return a, err
 	}
@@ -290,10 +293,11 @@ func validateLearningAnswers(c platform.Content, a map[string]string) bool {
 }
 func (s *server) saveLearningDraft(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Version int64             `json:"version"`
-		Answers map[string]string `json:"answers"`
+		Version     int64             `json:"version"`
+		BaseVersion *int64            `json:"base_version"`
+		Answers     map[string]string `json:"answers"`
 	}
-	if decodeLimit(r, &in, 100000) != nil || in.Version < 1 {
+	if decodeLimit(r, &in, 100000) != nil || in.Version < 1 || (in.BaseVersion != nil && *in.BaseVersion < 0) {
 		fail(w, 400, "作答格式无效")
 		return
 	}
@@ -307,7 +311,7 @@ func (s *server) saveLearningDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, _ := json.Marshal(in.Answers)
-	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_attempts SET draft_answers=$3,draft_version=$4 WHERE id=$1 AND user_id=$2 AND draft_version<$4 AND submitted_at IS NULL AND (deadline IS NULL OR deadline>clock_timestamp())`, a.ID, userID(r.Context()), string(raw), in.Version)
+	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_attempts SET draft_answers=$3,draft_version=$4 WHERE id=$1 AND user_id=$2 AND draft_version<$4 AND ($5::bigint IS NULL OR draft_version=$5) AND submitted_at IS NULL AND (deadline IS NULL OR deadline>clock_timestamp())`, a.ID, userID(r.Context()), string(raw), in.Version, in.BaseVersion)
 	if err != nil {
 		s.dbError(w, "save draft", err)
 		return
