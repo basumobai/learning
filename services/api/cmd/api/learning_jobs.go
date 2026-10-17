@@ -347,7 +347,33 @@ func (s *server) gradeLearning(ctx context.Context, p learningJobPayload, kind s
 			feedback[k] = v
 		}
 	}
+	// AI evaluations are suggestions, never replacements for an approved score.
+	suggestion := map[string]any{}
+	for _, k := range []string{"ai_grading", "essay_review", "independent_reviews", "score", "max_score"} {
+		if v, ok := feedback[k]; ok {
+			suggestion[k] = v
+		}
+	}
+	if a.RuleID != "" {
+		feedback = existing
+		feedback["needs_ai"] = false
+		feedback["ai_reference"] = true
+		feedback["ai_suggestion"] = suggestion
+	}
+	tx, err := s.learningWriteTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if lease, ok := ctx.Value(jobLeaseKey{}).(jobLease); ok {
+		_, err = tx.ExecContext(ctx, `INSERT INTO learning_ai_score_suggestions(job_id,attempt_id,result,model_snapshot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, lease.ID, a.ID, nullableJSON(suggestion), nullableJSON(p))
+	}
 	fr, _ := json.Marshal(feedback)
-	_, err = s.learningExec(ctx, `UPDATE learning_attempts SET feedback=$3 WHERE id=$1 AND user_id=$2 AND question_revision=$4`, a.ID, userID(ctx), string(fr), a.Question.Revision)
+	if err == nil {
+		_, err = tx.ExecContext(ctx, `UPDATE learning_attempts SET feedback=$3 WHERE id=$1 AND user_id=$2 AND question_revision=$4`, a.ID, userID(ctx), string(fr), a.Question.Revision)
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
 	return feedback, err
 }
