@@ -181,9 +181,11 @@ export default function AdminLearning() {
     </div>
   );
   return (
-    <main className="shell">
+    <main className="shell admin-root">
       <Navigation />
-      <AdminNavigation/>
+      <div className="admin-workspace-layout">
+        <AdminNavigation/>
+        <div className="admin-workspace-content">
       <div id="page-content" tabIndex={-1} className="learning-admin">
         <header className="page-intro">
           <span className="eyebrow">LEARNING · 管理工作台</span>
@@ -193,9 +195,6 @@ export default function AdminLearning() {
             发布。动态讲解在交卷答错或主动求助后生成。
           </p>
         </header>
-        <p>
-          <Link href="/admin#groups">账户、服务商、模型权限组与词库导入 →</Link>
-        </p>
 
         <div
           className="subject-tabs learning-admin-tabs"
@@ -1026,6 +1025,8 @@ export default function AdminLearning() {
             </p>
           </section>
         )}
+      </div>
+        </div>
       </div>
     </main>
   );

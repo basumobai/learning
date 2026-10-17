@@ -3886,3 +3886,221 @@ body:has(.figure-dialog[open]) {
 @media(min-width:701px) and (max-width:1250px){.app-topbar{flex-wrap:wrap;gap:8px 16px}.app-topbar .brand{flex:1}.app-topbar .account-menu{margin-left:auto}.app-topbar nav{order:3;flex-basis:100%;justify-content:space-between;border-top:1px solid var(--line);padding-top:8px}.app-topbar nav a{flex:1;min-width:44px;padding-inline:8px}}
 .resource-original-image{display:block;max-width:100%;height:auto;border:1px solid var(--line);border-radius:12px;background:#fff}.resource-source-pane figure{margin:12px 0}.resource-source-pane figcaption{font-size:12px;color:var(--muted);line-height:1.6}
 @media(min-width:851px){.resource-source-pane{max-height:calc(100dvh - 40px);overflow:auto;overscroll-behavior:contain;padding-bottom:12px}}
+
+
+/* Admin settings: Open WebUI-inspired categorized navigation, native Learning styling. */
+.admin-root .admin-workspace-layout,
+.resource-workspace .admin-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(228px, 250px) minmax(0, 1fr);
+  gap: clamp(16px, 2vw, 30px);
+  align-items: start;
+  min-width: 0;
+  margin-top: 20px;
+}
+.admin-workspace-content { min-width: 0; }
+.admin-root .intro { padding: 8px 0 22px; }
+.admin-root .intro h1 { font-size: clamp(25px, 2.6vw, 34px); margin: 8px 0; }
+.admin-root .intro p { max-width: 760px; }
+.admin-root .admin-settings-nav,
+.resource-workspace .admin-settings-nav {
+  position: sticky;
+  top: 118px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  max-height: calc(100dvh - 134px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 18px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+}
+.admin-nav-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+  padding: 0 10px;
+  font-size: 18px;
+  font-weight: 700;
+}
+.admin-nav-title span { font-size: 11px; font-weight: 500; color: var(--muted); }
+.admin-nav-heading {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.admin-nav-links { display: grid; gap: 2px; }
+.admin-settings-nav .admin-nav-links a {
+  display: grid;
+  gap: 2px;
+  align-items: center;
+  min-height: 54px;
+  border-radius: 12px;
+  padding: 9px 11px;
+  background: transparent;
+  border: 1px solid transparent;
+  text-decoration: none;
+  color: var(--ink);
+  font-size: 13px;
+}
+.admin-settings-nav .admin-nav-links a strong { font-weight: 600; }
+.admin-settings-nav .admin-nav-links a small { font-size: 11px; color: var(--muted); }
+.admin-settings-nav .admin-nav-links a:hover { background: var(--surface-soft); }
+.admin-settings-nav .admin-nav-links a[aria-current="page"] {
+  background: var(--selection);
+  border-color: #cfe1fa;
+  color: var(--blue);
+}
+.admin-settings-nav .admin-nav-links a[aria-current="page"] small { color: var(--blue); opacity: .8; }
+.admin-root .admin-workspace-content > .panel { max-width: none; }
+
+/* Provider model selector: explicit layout at all tablet widths. */
+.model-catalog-dialog {
+  box-sizing: border-box;
+  width: min(1040px, calc(100vw - 32px));
+  max-width: none;
+  height: min(850px, calc(100dvh - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+}
+.model-catalog-dialog::backdrop { background: rgba(16, 24, 40, .48); backdrop-filter: blur(5px); }
+.catalog-dialog-shell { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.catalog-dialog-header {
+  flex: none;
+  min-width: 0;
+  padding: 18px 24px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.catalog-dialog-header h2 { margin: 0; font-size: clamp(20px, 2.2vw, 25px); }
+.catalog-dialog-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px 16px;
+}
+.catalog-dialog-body > p:first-child { margin: 0 0 14px; color: var(--muted); line-height: 1.6; }
+.catalog-filters,
+.model-scope-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.catalog-filters label,
+.model-scope-controls label {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.catalog-filters select,
+.catalog-filters input,
+.model-scope-controls select,
+.model-scope-controls input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.model-scope-selector { min-width: 0; margin: 18px 0; }
+.model-scope-summary { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: 13px; margin-bottom: 12px; }
+.model-scope-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.model-scope-toolbar button { min-height: 40px; padding: 8px 12px; }
+.model-scope-only { margin-right: auto; white-space: nowrap; }
+.model-scope-selector .setting-note { margin: 8px 0 12px; font-size: 12px; color: var(--muted); }
+.model-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 330px;
+  min-height: 80px;
+  overflow-y: auto;
+  padding: 2px;
+}
+.model-scope-item {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.model-scope-item.is-selected { background: var(--selection); border-color: #bdd7f7; }
+.model-scope-item input { flex: none; align-self: start; margin-top: 3px; }
+.model-scope-item span { display: grid; gap: 4px; min-width: 0; }
+.model-scope-item strong, .model-scope-item small { overflow-wrap: anywhere; }
+.model-scope-item strong { font-size: 13px; }
+.model-scope-item small { font-size: 11px; color: var(--muted); }
+.catalog-metadata article { min-width: 0; }
+.catalog-actions {
+  position: static;
+  flex: none;
+  margin: 0;
+  padding: 14px 24px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  background: var(--surface);
+}
+.catalog-actions button { min-height: 44px; }
+@media (max-width: 900px) {
+  .admin-root .admin-workspace-layout,
+  .resource-workspace .admin-workspace-layout { grid-template-columns: minmax(0, 1fr); }
+  .admin-root .admin-settings-nav,
+  .resource-workspace .admin-settings-nav {
+    position: static;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    max-height: none;
+    overflow: visible;
+    padding: 12px;
+  }
+  .admin-nav-title { padding: 2px 5px 8px; }
+  .admin-nav-section { min-width: 0; }
+  .admin-nav-heading { padding: 4px 5px; }
+  .admin-nav-links { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 6px; }
+  .admin-settings-nav .admin-nav-links a { min-width: 135px; flex: 0 0 auto; min-height: 58px; }
+}
+@media (max-width: 620px) {
+  .admin-root { padding-inline: 16px; }
+  .resource-workspace { padding-inline: 16px; }
+  .model-catalog-dialog { width: calc(100vw - 12px); height: calc(100dvh - 12px); max-height: calc(100dvh - 12px); border-radius: 16px; }
+  .catalog-dialog-header { padding: 14px 16px; }
+  .catalog-dialog-body { padding: 14px 16px; }
+  .catalog-filters, .model-scope-controls { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .catalog-filters label, .model-scope-controls label { font-size: 12px; }
+  .model-scope-grid { grid-template-columns: minmax(0, 1fr); max-height: 38dvh; }
+  .model-scope-toolbar { align-items: stretch; }
+  .model-scope-toolbar button { flex: 1 1 auto; }
+  .catalog-actions { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); flex-wrap: wrap; }
+  .catalog-actions > button { flex: 1 1 140px; }
+}

@@ -144,16 +144,13 @@ export default function Admin() {
   }
   if (!auth.allowed) return <Loading />;
   return (
-    <main className="shell">
+    <main className="shell admin-root">
       <Navigation />
-      <AdminNavigation/>
+      <div className="admin-workspace-layout">
+        <AdminNavigation />
+        <div className="admin-workspace-content">
       {catalogProvider&&<ProviderModelCatalog providerId={catalogProvider} onClose={()=>setCatalogProvider("")} onSaved={load}/>}
       {tab==="providers"&&!!config?.models.length&&<section className="panel glass"><h2>批量启用与停用</h2><ModelScopeSelector models={config.models.map(m=>({...m,enabled:true}))} providers={config.providers} selected={bulkModels} onChange={setBulkModels} label="批量模型管理"/><div className="segments">{[true,false].map(enabled=><button key={String(enabled)} className="quiet" disabled={busy||!bulkModels.length} onClick={()=>void run(async()=>{await api("/admin/ai/models",{ids:bulkModels,enabled},"PATCH");await load();setBulkModels([]);})}>{enabled?"启用所选":"停用所选"}</button>)}</div></section>}
-      <p className="section-links">
-        <a href="/admin/resources">
-          资源管理：上传、智能分类、深度解析与审核 →
-        </a>
-      </p>
       <section className="intro" id="page-content" tabIndex={-1}>
         <span className="eyebrow">CONTENT · MODELS · ACCESS</span>
         <h1>把合适的资源，交给合适的人。</h1>
@@ -162,26 +159,6 @@ export default function Admin() {
           兼容接口，给用户分配可用模型。权限组只管理授权，不设置调用次数或对话额度。
         </p>
       </section>
-      <div className="segments admin-tabs" aria-label="管理项目">
-        {[
-          ["providers", "服务商与模型"],
-          ["groups", "身份组"],
-          ["users", "账户"],
-          ["import", "教材词库"],
-          ["audit", "操作记录"],
-        ].map(([id, label]) => (
-          <button
-            key={id}
-            aria-pressed={tab === id}
-            onClick={() => {
-              setTab(id);
-              window.history.replaceState(null, "", `/admin#${id}`);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
       {tab==="users"&&<section className="panel glass admin-confirm">
         <label>
           管理员当前密码
@@ -858,6 +835,8 @@ export default function Admin() {
           {error}
         </p>
       )}
+        </div>
+      </div>
     </main>
   );
 }

@@ -54,10 +54,14 @@ WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai
 | 查看最新日志 | `docker compose logs --tail=100` |
 | 持续查看日志 | `docker compose logs -f --tail=100` |
 | 重启 | `docker compose restart` |
-| 拉取代码后更新 | `git pull --ff-only && bash scripts/install.sh --update` |
+| 拉取并无缓存更新前端 | `git pull --ff-only && bash scripts/install.sh --update` |
 | 修复配置后恢复 | `bash scripts/install.sh --recover` |
 | 停止（保留数据库） | `docker compose down` |
 | 只生成配置，不启动 | `bash scripts/install.sh --config-only` |
+
+**更新行为：** `--update` 会无缓存重建 Web 前端、更新 Compose 服务、强制重新创建 Web 容器，最后打印 Git 修订号与 Next.js 构建 ID。新版后台 HTML 使用不缓存策略，浏览器会重新获取最新页面；带哈希的 JS/CSS 文件可以继续安全缓存。脚本**不会**清除数据库、Redis、用户凭据、历史资料或其他 Docker 项目的缓存。首次更新可能较慢，因为重新执行前端依赖安装。外部 Cloudflare / CDN 缓存不受本机脚本控制，若仍显示旧版，需要检查反向代理指向并按需从 CDN 控制台清除缓存。
+
+**管理员入口：** 登录后点击顶部「管理」，左侧「资源处理工作台」可进入 A/B/C 区；「AI 服务商与模型」可获取模型目录并多选。原误输入路径 `/admin/resource` 会跳转到 `/admin/resources`。手机和平板下管理员分类导航改为可横向滚动的分组入口。
 
 **不要执行 `docker compose down -v`**，除非确认要销毁本项目数据库卷。更新前请备份数据库与 `.env`；`APP_ENCRYPTION_KEY` 不能随意更换，否则已经加密的 API Key 和两步验证密钥将无法解密。安装器不会重设已有管理员密码。
 
