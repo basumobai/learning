@@ -176,6 +176,11 @@ func (s *server) processLearningJob(parent context.Context) error {
 	return s.processLearningJobQueue(parent, "")
 }
 func (s *server) processLearningJobQueue(parent context.Context, queue string) error {
+	if queue == "interactive" || queue == "" {
+		if err := s.processEvidenceOutbox(parent); err != nil {
+			return err
+		}
+	}
 	var id, owner, kind, resource string
 	var raw []byte
 	var generation, resourceRevision, attempts, maximum int
