@@ -6,7 +6,7 @@ type Event={version:number;action:string;type_id:string;note:string};
 type Data={types:{id:string;name:string}[];candidates:Candidate[];events:Event[]};
 export function MistakePanel({attemptId}:{attemptId:string}) {
  const [data,setData]=useState<Data|null>(null),[type,setType]=useState(""),[note,setNote]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false),[notice,setNotice]=useState("");
- const load=()=>api<Data>(`/learning/attempts/${attemptId}/mistakes`).then(d=>{setData(d);setType(v=>d.types.some(t=>t.id===v)?v:d.types[0]?.id||"")});
+ const load=()=>api<Data>(`/learning/attempts/${attemptId}/mistakes`).then(d=>{if(!Array.isArray(d.types)||!Array.isArray(d.events)||!Array.isArray(d.candidates))throw new Error("错因记录暂不可用，请稍后刷新");setData(d);setType(v=>d.types.some(t=>t.id===v)?v:d.types[0]?.id||"")});
  useEffect(()=>{setData(null);setError("");void load().catch(e=>setError(e.message))},[attemptId]);
  async function record(action:string,candidate?:Candidate) {setBusy(true);setError("");try{await api(`/learning/attempts/${attemptId}/mistakes`,{request_id:requestID(),expected_version:data?.events.at(-1)?.version||0,action,type_id:candidate?.type_id||type,candidate_id:candidate?.id||"",note});await load();setNotice(action==="understood"?"已记录理解；新题表现会另外记录。":"错因已保存，可随时更正。")}catch(e){setError((e as Error).message);void load()}finally{setBusy(false)}}
  async function train(kind:"retry"|"transfer") {setBusy(true);setError("");try{const out=await api<{id:string}>(`/learning/attempts/${attemptId}/${kind}`,{request_id:requestID()});window.location.assign(`/practice?attempt=${encodeURIComponent(out.id)}`)}catch(e){setError((e as Error).message);setBusy(false)}}
