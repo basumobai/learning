@@ -272,7 +272,7 @@ unset db_password
 # rebuild only the stateless Web image from scratch; never purge Redis, PostgreSQL,
 # uploaded PDFs, authentication sessions or shared Docker caches.
 if [[ "$MODE" == update ]]; then
-  printf '更新模式：无缓存重建 Web 前端（不清除用户数据、数据库和 Redis）。\\n'
+  printf '更新模式：无缓存重建 Web 前端（不清除用户数据、数据库和 Redis）。\n'
   docker compose build --no-cache web || die "Web 无缓存构建失败；原有数据库和运行容器保留。"
 fi
 docker compose up --build -d || die "启动失败。使用 docker compose ps 和 docker compose logs --tail=100 查看原因。"
@@ -298,11 +298,11 @@ fi
 if [[ "$MODE" == update ]]; then
   # Show the exact Git revision and on-disk Next.js build identifier for diagnosis.
   revision="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
-  printf '已部署 Git 版本：%s\\n' "$revision"
+  printf '已部署 Git 版本：%s\n' "$revision"
   docker compose exec -T web sh -c 'test -s /app/.next/BUILD_ID && printf "Next.js BUILD_ID: " && cat /app/.next/BUILD_ID && echo' ||
-    printf '注意：无法读取 Next.js BUILD_ID，请检查 Web 构建日志。\\n' >&2
-  printf '已重新创建 Web 容器。管理页面应使用 no-store，静态资源继续使用文件哈希缓存。\\n'
-  printf '若公网仍显示旧版，请核实 HTTPS 反向代理是否指向当前 Web 端口；Cloudflare/CDN 缓存必须从对应服务端单独清除。\\n'
+    printf '注意：无法读取 Next.js BUILD_ID，请检查 Web 构建日志。\n' >&2
+  printf '已重新创建 Web 容器。管理页面应使用 no-store，静态资源继续使用文件哈希缓存。\n'
+  printf '若公网仍显示旧版，请核实 HTTPS 反向代理是否指向当前 Web 端口；Cloudflare/CDN 缓存必须从对应服务端单独清除。\n'
 fi
 
 printf '\n安装完成！本机访问：http://localhost:%s\n' "$web_port"
