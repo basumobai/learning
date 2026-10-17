@@ -75,11 +75,11 @@ mv "$work/missing.env" .env
 cmp .env "$work/original.env"
 [[ "$(snapshot)" == "$before" ]]
 
-echo 'Real installer: verifying four healthy services'
+echo 'Real installer: verifying five healthy services'
 healthy=0
 for (( attempt=1; attempt<=30; attempt++ )); do
-  if docker compose ps --format json | python3 -c 'import json,sys; rows=[json.loads(line) for line in sys.stdin if line.strip()]; raise SystemExit(0 if len(rows)==4 and all(r["Health"]=="healthy" for r in rows) else 1)'; then healthy=1; break; fi
+  if docker compose ps --format json | python3 -c 'import json,sys; rows=[json.loads(line) for line in sys.stdin if line.strip()]; raise SystemExit(0 if len(rows)==5 and all(r["Health"]=="healthy" for r in rows) else 1)'; then healthy=1; break; fi
   sleep 2
 done
 (( healthy )) || { echo 'Core services did not become healthy' >&2; docker compose ps >&2; exit 1; }
-echo 'Real installer acceptance passed: fresh install, repeat, update, credential conflict, recovery, missing configuration, retained accounts/AI ciphertext, four healthy services.'
+echo 'Real installer acceptance passed: fresh install, repeat, update, credential conflict, recovery, missing configuration, retained accounts/AI ciphertext, five healthy services.'

@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -22,6 +25,7 @@ type server struct {
 	secureCookie  bool
 	encryptionKey []byte
 	client        *http.Client
+	redis         *redis.Client
 }
 
 func main() {
@@ -45,6 +49,44 @@ func main() {
 	if err != nil {
 		log.Fatal("database unavailable or authentication failed; restore the original .env and see docs/DEPLOY.md; database has not been reset")
 	}
+	if len(os.Args) > 1 && os.Args[1] == "admin-reset-password" {
+		if err := adminRecoveryCommand(context.Background(), db, os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "worker" || os.Args[1] == "worker-health") {
+		s, err := configure(db)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if os.Args[1] == "worker-health" {
+			var alive bool
+			if s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM learning_worker_heartbeats WHERE updated_at>now()-interval '45 seconds' AND split_part(id,':',1)=$1)`, workerHost()).Scan(&alive) != nil || !alive {
+				os.Exit(1)
+			}
+			return
+		}
+		workerCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		ready := false
+		for attempt := 0; attempt < 120; attempt++ {
+			if err = s.db.QueryRowContext(workerCtx, `SELECT to_regclass('learning_worker_heartbeats') IS NOT NULL`).Scan(&ready); err == nil && ready {
+				break
+			}
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+		}
+		if !ready {
+			log.Fatal("worker waiting for API migrations timed out")
+		}
+		s.learningWorkers(workerCtx)
+		<-workerCtx.Done()
+		return
+	}
 	if err := migrate(ctx, db); err != nil {
 		log.Fatal(err)
 	}
@@ -58,7 +100,9 @@ func main() {
 	if err := s.initLearning(context.Background()); err != nil {
 		log.Fatal(err)
 	}
-	s.learningWorkers(context.Background())
+	if os.Getenv("LEARNING_EMBEDDED_WORKER") == "true" {
+		s.learningWorkers(context.Background())
+	}
 	mux := s.routes()
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -69,6 +113,15 @@ func main() {
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
+	lock, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if _, err = lock.ExecContext(ctx, `SELECT pg_advisory_lock(19283742)`); err != nil {
+		return err
+	}
+	defer lock.ExecContext(context.Background(), `SELECT pg_advisory_unlock(19283742)`)
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
@@ -169,6 +222,13 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/review", s.review)
 	mux.HandleFunc("POST /api/v1/study/sessions/{id}/undo", s.undo)
 	s.extraRoutes(mux)
+	s.modelCatalogRoutes(mux)
+	s.resourceRoutes(mux)
+	s.shareRoutes(mux)
+	s.deepRoutes(mux)
+	s.reviewRoutes(mux)
+	s.curriculumRoutes(mux)
+	s.resourceOperationRoutes(mux)
 	s.learningRoutes(mux)
 	return s.protect(mux)
 }

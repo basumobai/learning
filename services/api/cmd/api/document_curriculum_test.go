@@ -155,8 +155,8 @@ func TestPDFClassificationRequiresScopeConfirmation(t *testing.T) {
 	admin.call("POST", "/api/v1/admin/learning/local-import", input, 400)
 	input["textbook"] = platform.EnglishEdition
 	manual := admin.call("POST", "/api/v1/admin/learning/local-import", input, 202)
-	if err = s.db.QueryRow(`SELECT scope_confirmed FROM learning_documents WHERE id=$1`, rawString(manual, "id")).Scan(&confirmed); err != nil || confirmed {
-		t.Fatal("manual hints bypassed scope confirmation", err)
+	if err = s.db.QueryRow(`SELECT scope_confirmed FROM learning_documents WHERE id=$1`, rawString(manual, "id")).Scan(&confirmed); err != nil || !confirmed || rawString(manual, "id") != id {
+		t.Fatal("duplicate import overwrote confirmed metadata", err)
 	}
 }
 
@@ -209,4 +209,20 @@ func TestTextbookVolumeFiltersDoNotMixRepeatedUnits(t *testing.T) {
 	if !found {
 		t.Fatal("English curriculum missing")
 	}
+}
+
+func TestQuestionSecondaryChapterMatchesWholeCurriculumScope(t *testing.T) {
+	s, student, _ := learningTestServer(t)
+	qid := learningInsertQuestion(t, s, "english", "reading")
+	if _, err := s.db.Exec(`UPDATE learning_chapters SET edition=$1,volume='必修第一册' WHERE id='ch-english'`, platform.EnglishEdition); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO learning_chapters(id,subject_id,title,edition,volume) VALUES('secondary-volume','english','Unit 1',$1,'选择性必修第一册')`, platform.EnglishEdition); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO learning_question_chapters(question_id,chapter_id) VALUES($1,'secondary-volume')`, qid); err != nil {
+		t.Fatal(err)
+	}
+	student.call("POST", "/api/v1/learning/attempts", map[string]any{"subject_id": "english", "kind": "reading", "edition": platform.EnglishEdition, "volume": "选择性必修第一册", "chapter_ids": []string{"secondary-volume"}, "request_id": "secondary-whole-scope"}, 200)
+	student.call("POST", "/api/v1/learning/attempts", map[string]any{"subject_id": "english", "kind": "reading", "edition": platform.EnglishEdition, "volume": "必修第一册", "chapter_ids": []string{"secondary-volume"}, "request_id": "secondary-mixed-scope"}, 404)
 }

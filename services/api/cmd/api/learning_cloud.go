@@ -15,7 +15,7 @@ import (
 
 func (s *server) learningCloud(w http.ResponseWriter, r *http.Request) {
 	var raw json.RawMessage
-	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT id,name,base_url,username,enabled FROM learning_cloud_connections ORDER BY name) t`).Scan(&raw)
+	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT id,name,base_url,username,enabled,adapter,options FROM learning_cloud_connections ORDER BY name) t`).Scan(&raw)
 	if err != nil {
 		s.dbError(w, "cloud connections", err)
 		return
@@ -31,17 +31,48 @@ func (s *server) saveLearningCloud(w http.ResponseWriter, r *http.Request) {
 		Secret   string `json:"secret"`
 		Enabled  bool   `json:"enabled"`
 		Password string `json:"admin_password"`
+		Adapter  string `json:"adapter"`
+		Options  struct {
+			Root  string   `json:"root"`
+			Hosts []string `json:"download_hosts"`
+		} `json:"options"`
 	}
 	if decodeLimit(r, &in, 16000) != nil || strings.TrimSpace(in.Name) == "" || len(in.Name) > 100 || len(in.Username) > 300 || len(in.Secret) > 4000 || len(in.ID) > 64 {
 		fail(w, 400, "云盘连接无效")
 		return
+	}
+	if in.Adapter == "" {
+		in.Adapter = "webdav"
+		if in.ID != "" {
+			var options []byte
+			if s.db.QueryRowContext(r.Context(), `SELECT adapter,options FROM learning_cloud_connections WHERE id=$1`, in.ID).Scan(&in.Adapter, &options) == nil {
+				_ = json.Unmarshal(options, &in.Options)
+			}
+		}
+	}
+	if in.Adapter != "webdav" && in.Adapter != "openlist" {
+		fail(w, 400, "连接适配器无效")
+		return
+	}
+	if in.Options.Root == "" {
+		in.Options.Root = "/"
+	}
+	if !safeMount(in.Options.Root) || len(in.Options.Hosts) > 20 {
+		fail(w, 400, "连接目录无效")
+		return
+	}
+	for _, h := range in.Options.Hosts {
+		if len(h) > 250 || strings.ContainsAny(h, "/:?@# ") || !strings.Contains(h, ".") {
+			fail(w, 400, "下载主机白名单无效")
+			return
+		}
 	}
 	in.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
 	if err := validateProviderURL(in.BaseURL); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	if in.ID == "" {
@@ -64,7 +95,7 @@ func (s *server) saveLearningCloud(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_cloud_connections(id,name,base_url,username,password,enabled) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO UPDATE SET name=$2,base_url=$3,username=$4,password=$5,enabled=$6`, in.ID, in.Name, in.BaseURL, in.Username, cipher, in.Enabled)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_cloud_connections(id,name,base_url,username,password,enabled,adapter,options) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET name=$2,base_url=$3,username=$4,password=$5,enabled=$6,adapter=$7,options=$8`, in.ID, in.Name, in.BaseURL, in.Username, cipher, in.Enabled, in.Adapter, nullableJSON(in.Options))
 	if err == nil {
 		err = audit(tx, r, "save_learning_cloud", in.ID)
 	}
@@ -96,7 +127,7 @@ func cloudResource(base, path string) (string, error) {
 func (s *server) cloudRequest(ctx context.Context, id, method, path string) (*http.Response, error) {
 	var base, user string
 	var cipher []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT base_url,username,password FROM learning_cloud_connections WHERE id=$1 AND enabled`, id).Scan(&base, &user, &cipher); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT base_url,username,password FROM learning_cloud_connections WHERE id=$1 AND enabled AND adapter='webdav'`, id).Scan(&base, &user, &cipher); err != nil {
 		return nil, err
 	}
 	if err := validateProviderURL(base); err != nil {
@@ -182,7 +213,7 @@ func (s *server) importCloudPDF(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "云盘文件参数无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	data := [][]byte{}

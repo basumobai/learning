@@ -18,7 +18,7 @@ func (s *server) queueLearningOCR(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请求格式无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	var exists bool
@@ -95,7 +95,7 @@ func (s *server) recognizePDF(ctx context.Context, id string) (any, error) {
 			return nil, fmt.Errorf("OCR 未提供文字或不确定说明，请检查视觉模型")
 		}
 		notes, _ := json.Marshal(out.Uncertain)
-		if _, err = s.db.ExecContext(ctx, `UPDATE learning_pages SET text_content=$4,text_source='ocr',ocr_notes=$5 WHERE document_id=$1 AND kind=$2 AND page=$3`, id, p.kind, p.n, out.Text, string(notes)); err != nil {
+		if _, err = s.learningExec(ctx, `UPDATE learning_pages SET text_content=$4,text_source='ocr',ocr_notes=$5 WHERE document_id=$1 AND kind=$2 AND page=$3`, id, p.kind, p.n, out.Text, string(notes)); err != nil {
 			return nil, err
 		}
 	}

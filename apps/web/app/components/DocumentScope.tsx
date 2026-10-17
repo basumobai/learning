@@ -52,7 +52,7 @@ export function DocumentScope({
         edition: confirmedEdition,
         volume,
         term,
-        admin_password: password,
+
       });
       await onConfirmed();
     } catch (e) {
@@ -207,7 +207,6 @@ export function DocumentScope({
           disabled={
             busy ||
             pending ||
-            !password ||
             !profile ||
             (!!recognition?.edition_conflict && subject === "english")
           }

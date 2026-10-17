@@ -2,15 +2,11 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"example.com/els/api/internal/platform"
 	"example.com/els/api/internal/security"
@@ -23,11 +19,15 @@ func (s *server) enqueueLearning(ctx context.Context, kind, key string, payload 
 	return id, err
 }
 func (s *server) learningJob(w http.ResponseWriter, r *http.Request) {
-	var kind, status, message string
+	var kind, status, message, queue string
 	var payload, result []byte
-	err := s.db.QueryRowContext(r.Context(), `SELECT kind,status,error,payload,result FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&kind, &status, &message, &payload, &result)
+	err := s.db.QueryRowContext(r.Context(), `SELECT kind,status,error,payload,result,queue FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&kind, &status, &message, &payload, &result, &queue)
 	if err != nil {
 		fail(w, 404, "任务不存在")
+		return
+	}
+	if queue != "interactive" && account(r.Context()).Role != "admin" {
+		fail(w, 403, "需要管理员权限")
 		return
 	}
 	if kind == "explanation" {
@@ -63,9 +63,13 @@ func (s *server) retryLearningJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var raw []byte
-	var kind string
-	if err := s.db.QueryRowContext(r.Context(), `SELECT payload,kind FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&raw, &kind); err != nil {
+	var kind, queue string
+	if err := s.db.QueryRowContext(r.Context(), `SELECT payload,kind,queue FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&raw, &kind, &queue); err != nil {
 		fail(w, 404, "任务不存在")
+		return
+	}
+	if queue != "interactive" && account(r.Context()).Role != "admin" {
+		fail(w, 403, "需要管理员权限")
 		return
 	}
 	if kind == "explanation" && (in.ModelSelection != nil || in.Personal != nil) {
@@ -101,7 +105,7 @@ func (s *server) retryLearningJob(w http.ResponseWriter, r *http.Request) {
 		raw, _ = json.Marshal(p)
 	}
 
-	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_jobs SET status='queued',error='',payload=$3,updated_at=now() WHERE id=$1 AND owner_id=$2 AND status='failed'`, r.PathValue("id"), userID(r.Context()), string(raw))
+	result, err := s.db.ExecContext(r.Context(), `UPDATE learning_jobs SET status='queued',error='',payload=$3,updated_at=now(),retry_at=now(),lease_until=NULL,lease_owner=NULL,pause_requested=false,cancel_requested=false WHERE id=$1 AND owner_id=$2 AND status='failed'`, r.PathValue("id"), userID(r.Context()), string(raw))
 	if err != nil {
 		s.dbError(w, "retry job", err)
 		return
@@ -134,98 +138,6 @@ func (s *server) learningPayloadModels(ctx context.Context, task string, p learn
 		return nil, aiModel{}, fmt.Errorf("模型配置已更新，请重新选择后重试")
 	}
 	return models, lead, err
-}
-
-func (s *server) learningWorkers(ctx context.Context) {
-	for i := 0; i < 2; i++ {
-		go func() {
-			timer := time.NewTicker(2 * time.Second)
-			defer timer.Stop()
-			for {
-				if err := s.processLearningJob(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) { /* Failures remain in the job record; no secrets in logs. */
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-timer.C:
-				}
-			}
-		}()
-	}
-}
-func (s *server) processLearningJob(parent context.Context) error {
-	var id, owner, kind string
-	var raw []byte
-	var generation int
-	err := s.db.QueryRowContext(parent, `UPDATE learning_jobs SET status='running',generation=generation+1,updated_at=now() WHERE id=(SELECT id FROM learning_jobs WHERE status='queued' OR (status='running' AND updated_at<now()-interval '12 minutes') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,owner_id,kind,payload,generation`).Scan(&id, &owner, &kind, &raw, &generation)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(parent, 10*time.Minute)
-	defer cancel()
-	var user identity
-	err = s.db.QueryRowContext(ctx, `SELECT id,role,group_id FROM users WHERE id=$1 AND NOT disabled AND NOT must_change_password`, owner).Scan(&user.ID, &user.Role, &user.GroupID)
-	ctx = context.WithValue(ctx, identityKey{}, user)
-	var p learningJobPayload
-	if err == nil {
-		err = json.Unmarshal(raw, &p)
-	}
-	var result any
-	if err == nil {
-		switch kind {
-		case "identify":
-			if user.Role != "admin" {
-				err = fmt.Errorf("需要管理员权限")
-			} else {
-				result, err = s.identifyPDF(ctx, p.DocumentID)
-			}
-		case "explanation":
-			result, err = s.generateExplanation(ctx, p)
-		case "grade", "essay":
-			result, err = s.gradeLearning(ctx, p, kind)
-		case "outline":
-			if user.Role != "admin" {
-				err = fmt.Errorf("需要管理员权限")
-			} else {
-				result, err = s.outlinePDF(ctx, p.DocumentID)
-			}
-		case "ocr":
-			if user.Role != "admin" {
-				err = fmt.Errorf("需要管理员权限")
-			} else {
-				result, err = s.recognizePDF(ctx, p.DocumentID)
-			}
-		case "extract":
-			if user.Role != "admin" {
-				err = fmt.Errorf("需要管理员权限")
-			} else {
-				result, err = s.extractPDF(ctx, p)
-			}
-		case "word_options":
-			if user.Role != "admin" {
-				err = fmt.Errorf("需要管理员权限")
-			} else {
-				result, err = s.generateWordSet(ctx, p)
-			}
-		default:
-			err = fmt.Errorf("未知任务")
-		}
-	}
-	status, message := "completed", ""
-	if err != nil {
-		status = "failed"
-		message = "生成失败：" + err.Error()
-		if len(message) > 500 {
-			message = "生成失败：请核对任务配置与输入文件。"
-		}
-		log.Printf("learning job %s (%s): %v", id, kind, err)
-		result = nil
-	}
-	data, _ := json.Marshal(result)
-	saveCtx, sc := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
-	defer sc()
-	_, e := s.db.ExecContext(saveCtx, `UPDATE learning_jobs SET status=$3,result=$4,error=$5,updated_at=now() WHERE id=$1 AND generation=$2 AND status='running'`, id, generation, status, string(data), message)
-	return e
 }
 
 const timelineContract = `返回结构 {"version":1,"text":"完整原文","spans":[{"id":"s1","start":0,"end":3,"role":"主语","tone":"yellow"}],"steps":[{"id":"step1","title":"找主干","explanation":"解释","span_ids":["s1"],"asset_ids":[]}],"summary":"总结"}。text 必须逐字等于输入source。start/end按Unicode码点计数，左闭右开。tone仅yellow/green/blue/pink/purple。所有span_ids与asset_ids必须存在。数学标注请包含完整的LaTeX公式及其分隔符，不要把一个公式拆到多个标注中。不返回HTML、JS或CSS。`
@@ -436,6 +348,6 @@ func (s *server) gradeLearning(ctx context.Context, p learningJobPayload, kind s
 		}
 	}
 	fr, _ := json.Marshal(feedback)
-	_, err = s.db.ExecContext(ctx, `UPDATE learning_attempts SET feedback=$3 WHERE id=$1 AND user_id=$2 AND question_revision=$4`, a.ID, userID(ctx), string(fr), a.Question.Revision)
+	_, err = s.learningExec(ctx, `UPDATE learning_attempts SET feedback=$3 WHERE id=$1 AND user_id=$2 AND question_revision=$4`, a.ID, userID(ctx), string(fr), a.Question.Revision)
 	return feedback, err
 }

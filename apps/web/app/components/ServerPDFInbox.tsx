@@ -42,7 +42,7 @@ export function ServerPDFInbox({
     try {
       await api("/admin/learning/local-import", {
         ...data,
-        admin_password: password,
+
       });
       await onImported();
       setMessage(
@@ -133,7 +133,7 @@ export function ServerPDFInbox({
         </p>
         <button
           className="primary"
-          disabled={busy || !password || !files.length}
+          disabled={busy || !files.length}
         >
           {busy ? "正在导入…" : "导入所选 PDF"}
         </button>
@@ -189,12 +189,12 @@ export function DocumentOCR({
       <button
         type="button"
         className="quiet"
-        disabled={busy || !password}
+        disabled={busy}
         onClick={async () => {
           setBusy(true);
           try {
             await api(`/admin/learning/documents/${id}/ocr`, {
-              admin_password: password,
+
             });
             setMessage("OCR已排队，已完成页会保留，稍后刷新预览。");
           } catch (e) {

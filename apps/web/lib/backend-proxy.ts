@@ -9,6 +9,9 @@ export async function proxyBackend(request: Request): Promise<Response> {
   const headers = new Headers();
   for (const name of [
     "content-type",
+    "range",
+    "if-range",
+    "if-none-match",
     "cookie",
     "origin",
     "referer",

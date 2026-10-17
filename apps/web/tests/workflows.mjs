@@ -179,9 +179,8 @@ try {
         }),
     );
     await page.goto(base + "/admin/learning");
-    await page
-      .getByLabel("当前管理员密码", { exact: true })
-      .fill("admin-disposable-password");
+    assert.equal(await page.getByLabel("当前管理员密码", { exact: true }).count(), 0);
+    checks++;
     await page.getByLabel("资料标题", { exact: true }).fill("服务器练习册");
     const inbox = page
       .getByRole("heading", { name: "从服务器目录导入 PDF" })

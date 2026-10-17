@@ -65,9 +65,14 @@ func (s *server) selectedLearningModels(ctx context.Context, task string, person
 		if err != nil {
 			return nil, aiModel{}, err
 		}
+		m.budgetTask = task
 		result = append(result, m)
 	}
 	lead, err := s.allowedModel(ctx, leadID, "chat")
+	lead.budgetTask = task
+	if task == "essay_reviewer" {
+		lead.budgetTask = "essay_lead"
+	}
 	return result, lead, err
 }
 func learningSelectionSnapshot(task string, models []aiModel, lead aiModel) *learningModelSelection {

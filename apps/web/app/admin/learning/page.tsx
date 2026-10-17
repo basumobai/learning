@@ -1,4 +1,6 @@
 "use client";
+import { AdminNavigation } from "../../components/AdminNavigation";
+import { ModelScopeSelector } from "../../components/ModelScopeSelector";
 import { ServerPDFInbox, DocumentOCR } from "../../components/ServerPDFInbox";
 import { DocumentScope } from "../../components/DocumentScope";
 import type { Recognition } from "../../../lib/curriculum";
@@ -15,6 +17,7 @@ type Task = {
   model_ids: number[];
   lead_model_id: number | null;
   revision: number;
+  routing?: {fallback_enabled:boolean;max_attempts:number;timeout_seconds:number;max_input_tokens:number;max_output_tokens:number;max_cost_usd:number|null};
 };
 type Chapter = {
   key: string;
@@ -65,6 +68,7 @@ type WordSet = {
   approved: boolean;
 };
 type Cloud = {
+ adapter?:string;
   id: string;
   name: string;
   base_url: string;
@@ -74,7 +78,7 @@ type Cloud = {
 export default function AdminLearning() {
   const auth = useProtected(true),
     [tab, setTab] = useState("documents"),
-    [password, setPassword] = useState(""),
+    [password] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
@@ -129,10 +133,10 @@ export default function AdminLearning() {
     setModels(c.models.filter((m) => m.kind === "chat"));
     setSets(w.sets);
     setDrafts(q.questions);
-    setClouds(cc.connections);
+    setClouds(cc.connections.filter(c=>!c.adapter||c.adapter==='webdav'));
   }
   useEffect(() => {
-    if (auth.allowed) load().catch((e) => setError(e.message));
+    if (auth.allowed) {const hash=window.location.hash.slice(1);if(["documents","questions","tasks","words","cloud"].includes(hash))setTab(hash);load().catch((e) => setError(e.message));}
   }, [auth.allowed]);
   useEffect(() => {
     if (
@@ -147,6 +151,7 @@ export default function AdminLearning() {
     );
     return () => clearInterval(timer);
   }, [documents]);
+  useEffect(()=>{const sync=()=>{const h=window.location.hash.slice(1);if(["documents","questions","tasks","words","cloud"].includes(h))setTab(h);};window.addEventListener("hashchange",sync);return()=>window.removeEventListener("hashchange",sync);},[]);
   async function run(work: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -178,6 +183,7 @@ export default function AdminLearning() {
   return (
     <main className="shell">
       <Navigation />
+      <AdminNavigation/>
       <div id="page-content" tabIndex={-1} className="learning-admin">
         <header className="page-intro">
           <span className="eyebrow">LEARNING · 管理工作台</span>
@@ -190,15 +196,7 @@ export default function AdminLearning() {
         <p>
           <Link href="/admin#groups">账户、服务商、模型权限组与词库导入 →</Link>
         </p>
-        <label className="admin-reauth">
-          当前管理员密码
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
+
         <div
           className="subject-tabs learning-admin-tabs"
           role="group"
@@ -267,7 +265,7 @@ export default function AdminLearning() {
                   void run(async () => {
                     await api("/admin/learning/tasks", {
                       ...task,
-                      admin_password: password,
+
                     });
                     await load();
                     setTask(null);
@@ -331,33 +329,9 @@ export default function AdminLearning() {
                   </>
                 )}
                 {task.backend === "api" && task.task !== "essay_lead" && (
-                  <fieldset className="chapter-picker">
-                    <legend>
-                      {task.task === "essay_reviewer"
-                        ? "评审模型（2–5个）"
-                        : "任务模型（按选择顺序使用第一个）"}
-                    </legend>
-                    {models.map((m) => (
-                      <label key={m.id}>
-                        <input
-                          type="checkbox"
-                          checked={task.model_ids.includes(m.id)}
-                          onChange={(e) =>
-                            setTask({
-                              ...task,
-                              model_ids: e.target.checked
-                                ? [...task.model_ids, m.id]
-                                : task.model_ids.filter((id) => id !== m.id),
-                            })
-                          }
-                        />
-                        <span>
-                          {m.name}
-                          <small>{m.model_id}</small>
-                        </span>
-                      </label>
-                    ))}
-                  </fieldset>
+                  <div><ModelScopeSelector models={models} selected={task.model_ids} onChange={ids=>setTask({...task,model_ids:ids})} maxSelected={5} label={task.task==="essay_reviewer"?"独立评审模型":"任务候选池"}/>
+                  <ol className="route-order">{task.model_ids.map((id,index)=><li key={id}><span>{index===0?"首选":"备用"}：{models.find(m=>m.id===id)?.name||id}</span><button type="button" className="quiet" disabled={index===0} onClick={()=>{const ids=[...task.model_ids];[ids[index-1],ids[index]]=[ids[index],ids[index-1]];setTask({...task,model_ids:ids});}}>上移</button></li>)}</ol>
+                  {task.routing&&task.task!=="essay_reviewer"&&<div className="form-grid"><label className="check-label"><input type="checkbox" checked={task.routing.fallback_enabled} onChange={e=>setTask({...task,routing:{...task.routing!,fallback_enabled:e.target.checked}})}/>首选失败后按顺序使用已授权备用</label>{([['max_attempts','最多外部尝试'],['timeout_seconds','总超时（秒）'],['max_input_tokens','最大输入tokens'],['max_output_tokens','最大输出tokens']] as const).map(([key,label])=><label key={key}>{label}<input type="number" value={task.routing![key]} onChange={e=>setTask({...task,routing:{...task.routing!,[key]:Number(e.target.value)}})}/></label>)}<label>单次费用上限 USD（留空仅限制token）<input type="number" step="0.001" value={task.routing.max_cost_usd??""} onChange={e=>setTask({...task,routing:{...task.routing!,max_cost_usd:e.target.value?Number(e.target.value):null}})}/></label></div>}</div>
                 )}
                 {task.task === "essay_lead" && (
                   <p className="setting-note">
@@ -385,7 +359,7 @@ export default function AdminLearning() {
                     </select>
                   </label>
                 )}
-                <button className="primary" disabled={busy || !password}>
+                <button className="primary" disabled={busy}>
                   保存配置
                 </button>
               </form>
@@ -405,7 +379,7 @@ export default function AdminLearning() {
                   e.preventDefault();
                   const data = new FormData(e.currentTarget);
                   void run(async () => {
-                    data.set("admin_password", password);
+
                     if (source === "upload")
                       await upload("/admin/learning/documents", data);
                     else {
@@ -418,7 +392,7 @@ export default function AdminLearning() {
                         connection_id: v.connection_id,
                         question_path: v.question_path,
                         answer_path: v.answer_path,
-                        admin_password: password,
+
                       });
                     }
                     await load();
@@ -520,7 +494,7 @@ export default function AdminLearning() {
                     </label>
                   </>
                 )}
-                <button className="primary" disabled={busy || !password}>
+                <button className="primary" disabled={busy}>
                   接收文件并识别资料
                 </button>
               </form>
@@ -721,7 +695,7 @@ export default function AdminLearning() {
                             chapters: outline.filter((c) =>
                               picked.includes(c.key),
                             ),
-                            admin_password: password,
+
                           },
                         );
                         await load();
@@ -799,7 +773,7 @@ export default function AdminLearning() {
                   {["draft", "published"].map((status) => (
                     <button
                       className={status === "published" ? "primary" : "quiet"}
-                      disabled={busy || !password}
+                      disabled={busy}
                       key={status}
                       onClick={() =>
                         void run(async () => {
@@ -809,7 +783,7 @@ export default function AdminLearning() {
                             solution: data.solution,
                             revision: draft.revision,
                             status,
-                            admin_password: password,
+
                           });
                           await load();
                           setDraft(null);
@@ -912,12 +886,12 @@ export default function AdminLearning() {
                   <p>{s.rationale}</p>
                   <button
                     className="quiet"
-                    disabled={busy || !password}
+                    disabled={busy}
                     onClick={() =>
                       void run(async () => {
                         await api(`/admin/learning/word-sets/${s.id}/approve`, {
                           approved: !s.approved,
-                          admin_password: password,
+
                         });
                         await load();
                       })
@@ -971,7 +945,7 @@ export default function AdminLearning() {
                 void run(async () => {
                   await api("/admin/learning/cloud", {
                     ...cloud,
-                    admin_password: password,
+
                   });
                   setCloud((v) => ({ ...v, secret: "" }));
                   await load();
@@ -1022,7 +996,7 @@ export default function AdminLearning() {
                 />
                 启用连接
               </label>
-              <button className="primary" disabled={busy || !password}>
+              <button className="primary" disabled={busy}>
                 保存云盘
               </button>
               {cloud.id && (

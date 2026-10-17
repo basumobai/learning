@@ -18,7 +18,7 @@ bash scripts/install.sh
 
 首次安装会交互询问 Web 和 API 的主机端口，并检查端口是否被占用；默认候选值是 3000 和 8080，遇到冲突可输入其他空闲端口。已有部署保留 .env；未配置端口时沿用 3000/8080，可手动添加 `WEB_PORT`、`API_PORT`。端口支持 1024–65535。无交互终端时使用默认值，也可在首次运行前设置 `WEB_PORT=3001 API_PORT=8081 bash scripts/install.sh`。不要停止占用端口的其他服务。
 
-首次运行会自动生成 `.env` 中的数据库密码、管理员初始密码与 32 字节加密密钥，构建并启动容器，检查 Web/API 是否就绪。**请保存终端首次显示的管理员密码**，首次登录后建议立即修改。已存在的 `.env` 与数据卷不会被安装器重置。
+首次运行会自动生成 `.env` 中的数据库密码、管理员初始密码与 32 字节加密密钥，构建并启动容器，检查 Web/API 是否就绪。**请保存终端首次显示的管理员密码**，首次登录必须修改。已存在的 `.env` 与数据卷不会被安装器重置。
 
 正式域名和自定义端口可在首次安装时一并指定：
 
@@ -34,13 +34,15 @@ WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai
 
 ### 安装后做什么
 
-1. 进入 **管理 → 服务商与模型**，配置 OpenRouter 等服务商的 API Key，添加所需聊天/TTS 模型。
+1. 进入 **管理 → 服务商与模型**，配置服务商并获取模型目录，可视化多选聊天/TTS模型；不支持发现的服务商可手动添加。
 2. 在 **身份组** 中授权模型，在 **管理 → 账户 → 自主注册** 选择新用户默认身份组。用户从登录页自行注册，也可关闭注册并由管理员创建。
-3. 进入 **多学科管理** `/admin/learning`，配置 AI 任务模型、导入并审核题库；或在管理页导入英语词库（单词、音标、词性、中文）。
+3. 进入 **管理员设置 → 资源管理** `/admin/resources`：原件进入A区，轻量内容分类进入B区，深度解析与审核在C区，发布后进入资源库和现有题库。独立语法/知识点专题不必绑定教材Unit。英语词库仍在原管理页导入。
 
 自己的密码在 **设置 → 密码与登录安全**，也可点击顶部姓名直达；管理员重置他人密码在 **管理 → 账户**。
 
-服务器 PDF 放在部署目录的 **`data/pdf/`**，本次部署即 `/www/wwwroot/learning/learning/data/pdf/`。进入 **多学科管理 → 资料入库 → 从服务器目录导入PDF** 刷新并选择题目、答案。默认自动建议学科、教材版本和册次，附PDF页码依据；确认后识别章/Unit/Lesson，再提取草稿。英语固定北师大版2019，其他科目按实际教材版本核对。OCR、归类、目录、题干、答案与配对分别配置模型。详见 [教材与高考题型](docs/CURRICULUM.md)、[PDF/OCR与听说流程](docs/IMPORT_AND_LISTENING.md)。
+服务器 PDF 放在 **`data/pdf/`**，也可在 `.env` 用 `LEARNING_PDF_DIR` 指定其他只读挂载根目录。资源工作台支持单PDF上传、相对子目录扫描、批量标签和可恢复任务；旧双PDF/WebDAV流程保留在 `/admin/learning`。
+
+网盘导入当前支持**已授权OpenList分享挂载目录**，只下载管理员选中的PDF；尚不支持凭任意夸克/百度链接直接解析。模型/网盘凭据不交给AI。详细配置、限制和数据迁移见 [v2操作与升级](docs/v2/OPERATIONS.md)。
 
 ## 常用运维命令
 
@@ -72,8 +74,12 @@ WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai
 | 广东听说 A朗读 / B三问五答 / C复述 | `/assistant#listening` |
 | 自主注册 / 自己的密码 | `/register` / `/settings#security` |
 | 服务商、模型、身份组与用户 | `/admin` |
-| PDF 题库与多学科配置 | `/admin/learning` |
+| A/B/C资源管理、扫描、分类与审核 | `/admin/resources` |
+| 正式学习资源 | `/resources` |
+| 任务、Worker状态与恢复 | `/admin/resources/jobs` |
+| 旧双PDF与多学科兼容配置 | `/admin/learning` |
 
+- [v2操作与升级](docs/v2/OPERATIONS.md) · [审计与设计](docs/v2/P0_AUDIT.md) · [分阶段验证](docs/v2/VALIDATION.md)
 - [功能与学习流程](docs/LEARNING.md) · [界面设计](docs/FRONTEND.md) · [安全与账号](docs/SECURITY.md)
 - [架构](docs/ARCHITECTURE.md) · [API](docs/API.md) · [数据库](docs/DATABASE.md) · [AI 设计](docs/AI.md) · [产品行为](docs/PRODUCT.md)
 - [验证与预览](docs/LEARNING_VALIDATION.md) · [与 AnkiDroid 对比](docs/ANKIDROID_COMPARISON.md) · [多端布局](docs/RESPONSIVE.md)

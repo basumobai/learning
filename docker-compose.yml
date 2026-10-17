@@ -27,7 +27,9 @@ services:
     build:
       context: .
       dockerfile: services/api/Dockerfile
-    environment:
+    environment: &api_environment
+      REDIS_URL: redis://redis:6379/0
+      LEARNING_EMBEDDED_WORKER: "false"
       DATABASE_URL: postgres://els:${POSTGRES_PASSWORD:-els_local_only}@postgres:5432/els?sslmode=disable
       ADDR: :8080
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
@@ -51,6 +53,28 @@ services:
       timeout: 3s
       start_period: 45s
       retries: 5
+  worker:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    command: ["/app/els", "worker"]
+    environment: *api_environment
+    volumes:
+      - ${LEARNING_PDF_DIR:-./data/pdf}:/data/pdf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/els", "worker-health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    mem_limit: 768m
+    pids_limit: 128
   web:
     restart: unless-stopped
     build:

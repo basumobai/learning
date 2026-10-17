@@ -2,6 +2,9 @@
 import { useEffect, useState } from "react";
 import { api, requestID, type User } from "../../lib/api";
 import { Loading, Navigation, useProtected } from "../providers";
+import { AdminNavigation } from "../components/AdminNavigation";
+import { ModelScopeSelector } from "../components/ModelScopeSelector";
+import { ProviderModelCatalog } from "../components/ProviderModelCatalog";
 import { RegistrationPolicy } from "../components/RegistrationPolicy";
 
 type Provider = {
@@ -22,7 +25,7 @@ type ConfigModel = {
   json_mode: boolean;
   enabled: boolean;
 };
-type Group = { id: number; name: string; model_ids: number[] };
+type Group = { id: number; name: string; model_ids: number[]; revision?: number };
 type Config = {
   encryption_ready: boolean;
   providers: Provider[];
@@ -86,6 +89,8 @@ export default function Admin() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState(emptyProvider);
+  const [catalogProvider,setCatalogProvider]=useState("");
+  const [bulkModels,setBulkModels]=useState<number[]>([]);
   const [model, setModel] = useState(emptyModel);
   const [voices, setVoices] = useState("cedar, marin, coral");
   const [group, setGroup] = useState<Group>({ id: 0, name: "", model_ids: [] });
@@ -109,6 +114,7 @@ export default function Admin() {
       load().catch((e) => setError(e.message));
     }
   }, [auth.allowed]);
+  useEffect(()=>{const sync=()=>{const h=window.location.hash.slice(1);if(["providers","groups","users","import","audit"].includes(h))setTab(h);};window.addEventListener("hashchange",sync);return()=>window.removeEventListener("hashchange",sync);},[]);
   async function run(work: () => Promise<unknown>) {
     if (busy) return;
     setBusy(true);
@@ -125,7 +131,7 @@ export default function Admin() {
   async function save(path: string, body: object, message: string) {
     const saved = await api<{ id: string | number }>(path, {
       ...body,
-      admin_password: adminPassword,
+      ...(path==="/admin/users"?{admin_password:adminPassword}:{}),
     });
     await load();
     setNotice(message);
@@ -140,9 +146,12 @@ export default function Admin() {
   return (
     <main className="shell">
       <Navigation />
+      <AdminNavigation/>
+      {catalogProvider&&<ProviderModelCatalog providerId={catalogProvider} onClose={()=>setCatalogProvider("")} onSaved={load}/>}
+      {tab==="providers"&&!!config?.models.length&&<section className="panel glass"><h2>批量启用与停用</h2><ModelScopeSelector models={config.models.map(m=>({...m,enabled:true}))} providers={config.providers} selected={bulkModels} onChange={setBulkModels} label="批量模型管理"/><div className="segments">{[true,false].map(enabled=><button key={String(enabled)} className="quiet" disabled={busy||!bulkModels.length} onClick={()=>void run(async()=>{await api("/admin/ai/models",{ids:bulkModels,enabled},"PATCH");await load();setBulkModels([]);})}>{enabled?"启用所选":"停用所选"}</button>)}</div></section>}
       <p className="section-links">
-        <a href="/admin/learning">
-          多学科题库、PDF 与云盘入库、AI 提示词及极速四选一 →
+        <a href="/admin/resources">
+          资源管理：上传、智能分类、深度解析与审核 →
         </a>
       </p>
       <section className="intro" id="page-content" tabIndex={-1}>
@@ -173,7 +182,7 @@ export default function Admin() {
           </button>
         ))}
       </div>
-      <section className="panel glass admin-confirm">
+      {tab==="users"&&<section className="panel glass admin-confirm">
         <label>
           管理员当前密码
           <input
@@ -185,7 +194,7 @@ export default function Admin() {
           />
         </label>
         <p className="setting-note">
-          保存账户、接口、权限或导入词库时需要再次验证。密码仅用于本次管理，不会保存在浏览器。
+          创建或修改账号需要重新认证；普通资源、模型与授权操作使用已有登录会话。
         </p>
         {config && !config.encryption_ready && (
           <p className="hint">
@@ -193,7 +202,7 @@ export default function Admin() {
             和两步验证前需要完成这一项。
           </p>
         )}
-      </section>
+      </section>}
       {tab === "providers" && (
         <>
           <section className="panel glass">
@@ -241,6 +250,7 @@ export default function Admin() {
                     id: String(saved.id),
                     api_key: "",
                   });
+                  setCatalogProvider(String(saved.id));
                 });
               }}
             >
@@ -291,9 +301,8 @@ export default function Admin() {
                 />
                 启用服务商
               </label>
-              <button className="primary" disabled={busy || !adminPassword}>
-                保存服务商
-              </button>
+              <button className="primary" disabled={busy}>保存服务商并选择模型</button>
+              {provider.id&&<button type="button" className="quiet" onClick={()=>setCatalogProvider(provider.id)}>获取模型目录 / 选择模型</button>}
             </form>
           </section>
           <section className="panel glass">
@@ -460,7 +469,7 @@ export default function Admin() {
                 />
                 启用模型
               </label>
-              <button className="primary" disabled={busy || !adminPassword}>
+              <button className="primary" disabled={busy}>
                 保存模型
               </button>
             </form>
@@ -515,33 +524,11 @@ export default function Admin() {
                 maxLength={100}
               />
             </label>
-            <fieldset>
-              <legend>允许调用的模型</legend>
-              <div className="model-grants">
-                {config?.models.map((m) => (
-                  <label className="check-label" key={m.id}>
-                    <input
-                      type="checkbox"
-                      checked={group.model_ids.includes(m.id)}
-                      onChange={(e) =>
-                        setGroup({
-                          ...group,
-                          model_ids: e.target.checked
-                            ? [...group.model_ids, m.id]
-                            : group.model_ids.filter((id) => id !== m.id),
-                        })
-                      }
-                    />
-                    {m.name} · {m.kind === "tts" ? "语音" : "聊天"}
-                    {!m.enabled ? "（已停用）" : ""}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+<ModelScopeSelector models={config?.models||[]} providers={config?.providers||[]} selected={group.model_ids} onChange={ids=>setGroup({...group,model_ids:ids})} label="身份组模型授权"/>
             <p className="setting-note">
               学生只能选择组内启用的模型；撤销授权会阻止待执行任务与后续追问。管理员在学生练习区也遵循身份组，资料入库任务单独按管理员配置执行。没有调用次数额度。
             </p>
-            <button className="primary" disabled={busy || !adminPassword}>
+            <button className="primary" disabled={busy}>
               保存身份组
             </button>
           </form>
@@ -687,7 +674,7 @@ export default function Admin() {
                 用户丢失验证器：同时重置两步验证（必须设置新密码）
               </label>
             )}
-            <button className="primary" disabled={busy || !adminPassword}>
+            <button className="primary" disabled={busy}>
               保存账户
             </button>
           </form>
@@ -770,8 +757,7 @@ export default function Admin() {
                       text,
                       overwrite_phonetic: overwrite,
                       request_id: id,
-                      admin_password: adminPassword,
-                    },
+                                          },
                   );
                   await load();
                   setNotice(

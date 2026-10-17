@@ -42,7 +42,7 @@ func (s *server) uploadLearningDocument(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
-	if !s.adminPassword(w, r, r.FormValue("admin_password")) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	q, err := readPDF(r, "question_pdf")
@@ -66,31 +66,28 @@ func (s *server) storeLearningDocument(w http.ResponseWriter, r *http.Request, t
 		fail(w, 400, "英语教材固定北师大版2019，请核对PDF版本")
 		return
 	}
-	id := security.Token(18)
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	id, err := s.storeRawResource(r.Context(), title, q, a, resourceSource{Kind: "upload", Name: title, Metadata: map[string]any{}})
 	if err != nil {
-		s.dbError(w, "store PDFs", err)
+		fail(w, 400, err.Error())
 		return
 	}
-	defer tx.Rollback()
-	fingerprint := security.Digest(subject + ":" + textbook + ":" + term + ":" + title + ":" + security.Digest(string(q)) + ":" + security.Digest(string(a)))
-	var subjectValue any
+	var sid any
 	if subject != "" {
-		subjectValue = subject
+		sid = subject
 	}
-	err = tx.QueryRowContext(r.Context(), `INSERT INTO learning_documents(id,owner_id,title,subject_id,textbook,term,question_pdf,answer_pdf,source_fingerprint,scope_confirmed) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,false) ON CONFLICT(source_fingerprint) DO UPDATE SET source_fingerprint=EXCLUDED.source_fingerprint RETURNING id`, id, userID(r.Context()), title, subjectValue, textbook, term, q, a, fingerprint).Scan(&id)
+	// Old clients still receive their physical PDF snapshot columns. New single-file
+	// resources only use the immutable blob and never store an empty fake answer PDF.
+	_, err = s.db.ExecContext(r.Context(), `UPDATE learning_documents SET question_pdf=COALESCE(question_pdf,$2),answer_pdf=COALESCE(answer_pdf,$3) WHERE id=$1`, id, q, a)
+	if err == nil {
+		_, err = s.db.ExecContext(r.Context(), `UPDATE learning_documents SET subject_id=$2,textbook=$3,term=$4 WHERE id=$1 AND NOT scope_confirmed AND stage='A'`, id, sid, textbook, term)
+	}
 	if err != nil {
-		s.dbError(w, "store PDFs", err)
+		s.dbError(w, "legacy resource hints", err)
 		return
 	}
-	job := security.Token(18)
-	kind := "identify"
-	err = tx.QueryRowContext(r.Context(), `INSERT INTO learning_jobs(id,owner_id,kind,dedupe_key,payload) VALUES($1,$2,$4,$3,jsonb_build_object('document_id',$3::text)) ON CONFLICT(owner_id,kind,dedupe_key) DO UPDATE SET dedupe_key=EXCLUDED.dedupe_key RETURNING id`, job, userID(r.Context()), id, kind).Scan(&job)
-	if err == nil {
-		err = tx.Commit()
-	}
+	job, err := s.enqueueLearning(r.Context(), "identify", id, map[string]any{"document_id": id})
 	if err != nil {
-		s.dbError(w, "queue outline", err)
+		s.dbError(w, "queue identification", err)
 		return
 	}
 	respond(w, 202, map[string]string{"id": id, "job_id": job})
@@ -125,7 +122,7 @@ func (s *server) extractLearningDocument(w http.ResponseWriter, r *http.Request)
 		fail(w, 400, "请选择章节及题目/答案页码")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	if err := s.validateChapterPages(r.Context(), r.PathValue("id"), in.Chapters); err != nil {
@@ -248,19 +245,26 @@ func pdfTexts(ctx context.Context, data []byte) ([]string, error) {
 	return result, nil
 }
 func (s *server) preparePDF(ctx context.Context, id string) error {
-	var q, a []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT question_pdf,answer_pdf FROM learning_documents WHERE id=$1`, id).Scan(&q, &a); err != nil {
+	q, err := s.documentPDF(ctx, id, "question")
+	if err != nil {
+		return err
+	}
+	a, err := s.documentPDF(ctx, id, "answer")
+	if err != nil {
 		return err
 	}
 	qt, err := pdfTexts(ctx, q)
 	if err != nil {
 		return err
 	}
-	at, err := pdfTexts(ctx, a)
-	if err != nil {
-		return err
+	at := []string{}
+	if len(a) > 0 {
+		at, err = pdfTexts(ctx, a)
+		if err != nil {
+			return err
+		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.learningWriteTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -286,14 +290,9 @@ func (s *server) pageImage(ctx context.Context, id, kind string, page int) ([]by
 	if len(data) > 0 {
 		return data, nil
 	}
-	column := "question_pdf"
-	if kind == "answer" {
-		column = "answer_pdf"
-	} else if kind != "question" {
-		return nil, fmt.Errorf("页类型无效")
-	}
-	if err := s.db.QueryRowContext(ctx, `SELECT `+column+` FROM learning_documents WHERE id=$1`, id).Scan(&data); err != nil {
-		return nil, err
+	data, err := s.documentPDF(ctx, id, kind)
+	if err != nil || len(data) == 0 {
+		return nil, fmt.Errorf("PDF原件不存在")
 	}
 	dir, err := os.MkdirTemp("", "learning-page-")
 	if err != nil {
@@ -313,7 +312,7 @@ func (s *server) pageImage(ctx context.Context, id, kind string, page int) ([]by
 	if err != nil || len(data) > 8*1024*1024 {
 		return nil, fmt.Errorf("PDF渲染无效")
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE learning_pages SET image=$4 WHERE document_id=$1 AND kind=$2 AND page=$3`, id, kind, page, data)
+	_, err = s.learningExec(ctx, `UPDATE learning_pages SET image=$4 WHERE document_id=$1 AND kind=$2 AND page=$3`, id, kind, page, data)
 	return data, err
 }
 func (s *server) learningPage(w http.ResponseWriter, r *http.Request) {
@@ -433,7 +432,7 @@ func (s *server) outlinePDF(ctx context.Context, id string) (any, error) {
 			all = append(all, c)
 		}
 		progress, _ := json.Marshal(map[string]any{"chapters": all, "requires_review": true, "complete": false})
-		if _, err = s.db.ExecContext(ctx, `UPDATE learning_documents SET outline=$2,outline_scanned_pages=$3 WHERE id=$1`, id, string(progress), min(start+8, len(pages))); err != nil {
+		if _, err = s.learningExec(ctx, `UPDATE learning_documents SET outline=$2,outline_scanned_pages=$3 WHERE id=$1`, id, string(progress), min(start+8, len(pages))); err != nil {
 			return nil, err
 		}
 	}
@@ -442,7 +441,7 @@ func (s *server) outlinePDF(ctx context.Context, id string) (any, error) {
 	}
 	result := map[string]any{"chapters": all, "requires_review": true, "complete": true}
 	raw, _ := json.Marshal(result)
-	_, err = s.db.ExecContext(ctx, `UPDATE learning_documents SET outline=$2 WHERE id=$1`, id, string(raw))
+	_, err = s.learningExec(ctx, `UPDATE learning_documents SET outline=$2 WHERE id=$1`, id, string(raw))
 	return result, err
 }
 
@@ -548,7 +547,7 @@ func (s *server) extractPDF(ctx context.Context, p learningJobPayload) (any, err
 		if len(out.Questions) < 1 || len(out.Questions) > 60 {
 			return nil, fmt.Errorf("题目数量无效")
 		}
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := s.learningWriteTx(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -657,7 +656,7 @@ func (s *server) saveLearningQuestion(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "题目格式无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	var subject, kind string

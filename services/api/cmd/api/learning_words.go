@@ -74,7 +74,7 @@ func (s *server) generateWordSet(ctx context.Context, p learningJobPayload) (any
 	}
 	id := security.Token(18)
 	choices, _ := json.Marshal(set.Choices)
-	_, err = s.db.ExecContext(ctx, `INSERT INTO learning_word_sets(id,sense_id,direction,difficulty,prompt,choices,correct_id,rationale) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, id, p.SenseID, p.Direction, p.Difficulty, set.Prompt, string(choices), set.CorrectID, set.Rationale)
+	_, err = s.learningExec(ctx, `INSERT INTO learning_word_sets(id,sense_id,direction,difficulty,prompt,choices,correct_id,rationale) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, id, p.SenseID, p.Direction, p.Difficulty, set.Prompt, string(choices), set.CorrectID, set.Rationale)
 	return map[string]string{"id": id}, err
 }
 func (s *server) adminWordSets(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +95,7 @@ func (s *server) approveWordSet(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请求无效")
 		return
 	}
-	if !s.adminPassword(w, r, in.Password) {
+	if !s.adminSession(w, r) {
 		return
 	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
