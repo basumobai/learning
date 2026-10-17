@@ -1,4 +1,52 @@
 "use client";
-import {useState} from "react";
-import {api,requestID} from "../../lib/api";
-export function ListeningReflection({trainingId}:{trainingId:string}){const [reason,setReason]=useState("not_understood"),[notes,setNotes]=useState(""),[next,setNext]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);return <section className="evidence-card"><h3>听力卡在哪一步？</h3><label>这次更接近<select value={reason} onChange={e=>setReason(e.target.value)}><option value="not_understood">声音和词没对应上：没听懂</option><option value="heard_forgot">当时听懂了，做题时记不住</option></select></label><label>先不重听，记下还记得的人物、时间、地点和转折<textarea value={notes} maxLength={1000} onChange={e=>setNotes(e.target.value)}/></label><button disabled={busy} onClick={async()=>{setBusy(true);setError("");try{const d=await api<{next_step:string}>(`/learning/english/listening/${trainingId}/reflection`,{request_id:requestID(),reason,notes});setNext(d.next_step)}catch(e){setError((e as Error).message)}finally{setBusy(false)}}}>记录并选择训练步骤</button>{next&&<p role="status">{next}</p>}{error&&<p role="alert">{error}</p>}</section>}
+import { useState } from "react";
+import { api, requestID } from "../../lib/api";
+export function ListeningReflection({ trainingId }: { trainingId: string }) {
+  const [reason, setReason] = useState("not_understood"),
+    [notes, setNotes] = useState(""),
+    [next, setNext] = useState(""),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  return (
+    <section className="evidence-card">
+      <h3>听力卡在哪一步？</h3>
+      <label>
+        这次更接近
+        <select value={reason} onChange={(e) => setReason(e.target.value)}>
+          <option value="not_understood">声音和词没对应上：没听懂</option>
+          <option value="heard_forgot">当时听懂了，做题时记不住</option>
+        </select>
+      </label>
+      <label>
+        先不重听，记下还记得的人物、时间、地点和转折
+        <textarea
+          value={notes}
+          maxLength={1000}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </label>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            const d = await api<{ next_step: string }>(
+              `/learning/english/listening/${trainingId}/reflection`,
+              { request_id: requestID(), reason, notes },
+            );
+            setNext(d.next_step);
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        记录并选择训练步骤
+      </button>
+      {next && <p role="status">{next}</p>}
+      {error && <p role="alert">{error}</p>}
+    </section>
+  );
+}

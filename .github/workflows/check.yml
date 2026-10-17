@@ -86,6 +86,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Prepare disposable PDF inbox
+        run: |
+          mkdir -p data/pdf
+          cp services/api/cmd/api/testdata/questions.pdf data/pdf/restore-fixture.pdf
       - name: Start complete development stack
         run: docker compose up --build -d
       - name: Wait for API and web readiness

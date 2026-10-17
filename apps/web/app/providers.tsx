@@ -128,7 +128,7 @@ export function Navigation() {
         ];
   const activeHref =
     path === "/" ||
-    ["/english", "/practice", "/challenge"].some(
+    ["/english", "/practice", "/challenge", "/progress", "/review", "/exams"].some(
       (p) => path === p || path.startsWith(p + "/"),
     )
       ? "/"

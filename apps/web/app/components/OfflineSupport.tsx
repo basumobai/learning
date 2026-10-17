@@ -1,4 +1,36 @@
 "use client";
-import {useEffect,useState} from "react";
-import {clearPrivateData} from "../../lib/offline";
-export function OfflineSupport(){const [online,setOnline]=useState(true);useEffect(()=>{const update=()=>setOnline(navigator.onLine);update();window.addEventListener("online",update);window.addEventListener("offline",update);if("serviceWorker" in navigator&&window.isSecureContext)void navigator.serviceWorker.register("/sw.js").catch(()=>{});let channel:BroadcastChannel|undefined;try{channel=new BroadcastChannel("learning-account-v1");channel.onmessage=event=>{const same=event.data?.user_id&&localStorage.getItem("learning-private-owner")===event.data.user_id;void (same?Promise.resolve():clearPrivateData()).finally(()=>window.location.reload())}}catch{}return()=>{window.removeEventListener("online",update);window.removeEventListener("offline",update);channel?.close()}},[]);return online?null:<aside className="offline-banner" role="status">当前离线。普通练习草稿保存在本机，交卷需联网确认；正式模拟卷以服务器草稿和截止为准。</aside>}
+import { useEffect, useState } from "react";
+import { clearPrivateData } from "../../lib/offline";
+export function OfflineSupport() {
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    if ("serviceWorker" in navigator && window.isSecureContext)
+      void navigator.serviceWorker.register("/sw.js").catch(() => {});
+    let channel: BroadcastChannel | undefined;
+    try {
+      channel = new BroadcastChannel("learning-account-v1");
+      channel.onmessage = (event) => {
+        const same =
+          event.data?.user_id &&
+          localStorage.getItem("learning-private-owner") === event.data.user_id;
+        void (same ? Promise.resolve() : clearPrivateData()).finally(() =>
+          window.location.reload(),
+        );
+      };
+    } catch {}
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+      channel?.close();
+    };
+  }, []);
+  return online ? null : (
+    <aside className="offline-banner" role="status">
+      当前离线。普通练习草稿保存在本机，交卷需联网确认；正式模拟卷以服务器草稿和截止为准。
+    </aside>
+  );
+}

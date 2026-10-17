@@ -1,19 +1,322 @@
 "use client";
-import {useEffect,useMemo,useState} from "react";
-import {api,requestID} from "../../lib/api";
-import {sentenceTimeline} from "../../lib/learning";
-import {TimelinePlayer} from "./TimelinePlayer";
-type Mark={start:number;end:number;role:string};
-type Analysis={translation:string;main_clause:string;chunks:{text:string;role:string;explanation:string}[];grammar:string[];paraphrase:string;check:{question:string;answer:string;explanation:string}};
-type Session={id:string;text:string;parent_id?:string;ai_generated?:boolean;analysis:Analysis|null;attempts:{marks:Mark[];translation:string;skipped:boolean}[]};
-const roles:Record<string,string>={subject:"主语",predicate:"谓语",object:"宾语",complement:"表语",clause:"从句",modifier:"修饰",connector:"逻辑连接"};
-export function SyntaxLab({modelId}:{modelId:number}) {
- const [text,setText]=useState(""),[session,setSession]=useState<Session|null>(null),[marks,setMarks]=useState<Mark[]>([]),[translation,setTranslation]=useState(""),[role,setRole]=useState("subject"),[start,setStart]=useState<number|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[showCheck,setShowCheck]=useState(false),[demo,setDemo]=useState(false),[source,setSource]=useState("");
- useEffect(()=>{const id=new URLSearchParams(window.location.search).get("source_attempt");if(id)void api<{submitted_at:string|null;question:{subject_id:string;content:{passage?:string;text:string}}}>(`/learning/attempts/${encodeURIComponent(id)}`).then(a=>{if(a.submitted_at&&a.question.subject_id==="english"){setText(Array.from(a.question.content.passage||a.question.content.text).slice(0,1200).join(""));setSource(id)}}).catch(e=>setError(e.message))},[]);
- const tokens=useMemo(()=>Array.from((session?.text||"").matchAll(/\S+/gu)).map(m=>({text:m[0],start:Array.from(session!.text.slice(0,m.index)).length,end:Array.from(session!.text.slice(0,m.index!+m[0].length)).length})),[session?.text]);
- const timeline=useMemo(()=>session?.analysis?sentenceTimeline(session.text,session.analysis.chunks,session.analysis.main_clause):null,[session]);
- async function act(fn:()=>Promise<void>){setBusy(true);setError("");try{await fn()}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
- function install(d:Session){setSession(d);setText(d.text);setMarks(d.attempts?.at(-1)?.marks||[]);setTranslation(d.attempts?.at(-1)?.translation||"");setStart(null);setShowCheck(false);setDemo(false)}
- async function reveal(skip:boolean){if(!session)return;await api(`/learning/english/syntax/${session.id}/attempt`,{request_id:requestID(),marks,translation,skip});const d=await api<Session>(`/learning/english/syntax/${session.id}/reveal`,{request_id:requestID(),model_id:modelId});install(d)}
- return <section className="panel glass syntax-lab"><h2>先自己拆一句</h2><p>点选一个词作为起点，再点终点，把片段标为主语、谓语、从句或修饰。也可先写翻译。</p>{error&&<p className="error" role="alert">{error}</p>}{!session?<><label>英语原句<textarea rows={4} maxLength={1200} value={text} onChange={e=>{setText(e.target.value);setSource("")}}/></label><button className="primary" disabled={busy||text.trim().length<5} onClick={()=>void act(async()=>install(await api<Session>("/learning/english/syntax",{request_id:requestID(),text,source_attempt_id:source})))}>开始独立拆句</button></>:<><p className="setting-note">{session.parent_id?"新句验证 · 请重新独立尝试":"独立尝试"}{session.ai_generated?" · AI 原创新句，语法等价尚待核验":""}</p><div className="syntax-tokens" lang="en">{tokens.map((t,i)=><button key={i} disabled={!!session.analysis||busy} className={marks.some(m=>m.start<=t.start&&m.end>=t.end)?"marked-token":""} aria-label={`选择词 ${i+1} ${t.text}`} aria-pressed={start===i} onClick={()=>{if(start===null)setStart(i);else{const a=tokens[Math.min(start,i)],b=tokens[Math.max(start,i)];setMarks(v=>[...v,{start:a.start,end:b.end,role}]);setStart(null)}}}>{t.text}</button>)}</div>{!session.analysis?<><label>片段角色<select value={role} onChange={e=>setRole(e.target.value)}>{Object.entries(roles).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label><p role="status">{start===null?"选择起点和终点。":"再选片段终点；同一个词可以再点一次。"}</p>{marks.map((m,i)=><p key={i}>{roles[m.role]}：{Array.from(session.text).slice(m.start,m.end).join("")} <button aria-label={`移除标注 ${i+1}`} onClick={()=>setMarks(v=>v.filter((_,n)=>n!==i))}>移除</button></p>)}<label>我的翻译<textarea maxLength={2000} value={translation} onChange={e=>setTranslation(e.target.value)}/></label><div className="button-row"><button className="primary" disabled={busy||!modelId||(!marks.length&&!translation.trim())} onClick={()=>void act(()=>reveal(false))}>提交尝试并看反馈</button><button disabled={busy||!modelId} onClick={()=>void act(()=>reveal(true))}>跳过尝试，直接看讲解</button></div>{!modelId&&<p>先选择一个有权限的助学模型，即可查看反馈。</p>}</>:<div className="sentence-analysis"><h3>对照参考分析</h3><p>你的翻译：{translation||"本次跳过"}</p><p>AI 译文：{session.analysis.translation}</p><p>主干：{session.analysis.main_clause}</p>{session.analysis.chunks.map((c,i)=><article key={i} className="evidence-card"><strong>{c.role} · {c.text}</strong><p>{c.explanation}</p></article>)}<p>{session.analysis.grammar.join("；")}</p><p>{session.analysis.check.question}</p><button onClick={()=>setShowCheck(v=>!v)}>{showCheck?"收起答案":"查看参考答案"}</button>{showCheck&&<p>{session.analysis.check.answer} · {session.analysis.check.explanation}</p>}<button onClick={()=>setDemo(v=>!v)}>{demo?"收起动态演示":"没理解，动态演示"}</button>{demo&&timeline&&<TimelinePlayer timeline={timeline}/>}<div className="button-row"><button className="primary" disabled={busy||!modelId} onClick={()=>void act(async()=>{const d=await api<{id:string}>(`/learning/english/syntax/${session.id}/transfer`,{request_id:requestID(),model_id:modelId});install(await api<Session>(`/learning/english/syntax/${d.id}`))})}>换新句验证</button><button onClick={()=>{setSession(null);setText("");setSource("")}}>自主选择另一句</button></div><p className="setting-note">AI 分析是参考；新句尝试单独记录，不直接折算掌握率。</p></div>}</>}</section>
+import { useEffect, useMemo, useState } from "react";
+import { api, requestID } from "../../lib/api";
+import { sentenceTimeline } from "../../lib/learning";
+import { TimelinePlayer } from "./TimelinePlayer";
+type Mark = { start: number; end: number; role: string };
+type Analysis = {
+  translation: string;
+  main_clause: string;
+  chunks: { text: string; role: string; explanation: string }[];
+  grammar: string[];
+  paraphrase: string;
+  check: { question: string; answer: string; explanation: string };
+};
+type Session = {
+  id: string;
+  text: string;
+  parent_id?: string;
+  ai_generated?: boolean;
+  analysis: Analysis | null;
+  attempts: { marks: Mark[]; translation: string; skipped: boolean }[];
+};
+const roles: Record<string, string> = {
+  subject: "主语",
+  predicate: "谓语",
+  object: "宾语",
+  complement: "表语",
+  clause: "从句",
+  modifier: "修饰",
+  connector: "逻辑连接",
+};
+export function SyntaxLab({ modelId }: { modelId: number }) {
+  const [text, setText] = useState(""),
+    [session, setSession] = useState<Session | null>(null),
+    [marks, setMarks] = useState<Mark[]>([]),
+    [translation, setTranslation] = useState(""),
+    [role, setRole] = useState("subject"),
+    [start, setStart] = useState<number | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [showCheck, setShowCheck] = useState(false),
+    [demo, setDemo] = useState(false),
+    [source, setSource] = useState("");
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get(
+      "source_attempt",
+    );
+    if (id)
+      void api<{
+        submitted_at: string | null;
+        question: {
+          subject_id: string;
+          content: { passage?: string; text: string };
+        };
+      }>(`/learning/attempts/${encodeURIComponent(id)}`)
+        .then((a) => {
+          if (a.submitted_at && a.question.subject_id === "english") {
+            setText(
+              Array.from(a.question.content.passage || a.question.content.text)
+                .slice(0, 1200)
+                .join(""),
+            );
+            setSource(id);
+          }
+        })
+        .catch((e) => setError(e.message));
+  }, []);
+  const tokens = useMemo(
+    () =>
+      Array.from((session?.text || "").matchAll(/\S+/gu)).map((m) => ({
+        text: m[0],
+        start: Array.from(session!.text.slice(0, m.index)).length,
+        end: Array.from(session!.text.slice(0, m.index! + m[0].length)).length,
+      })),
+    [session?.text],
+  );
+  const timeline = useMemo(
+    () =>
+      session?.analysis
+        ? sentenceTimeline(
+            session.text,
+            session.analysis.chunks,
+            session.analysis.main_clause,
+          )
+        : null,
+    [session],
+  );
+  async function act(fn: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function install(d: Session) {
+    setSession(d);
+    setText(d.text);
+    setMarks(d.attempts?.at(-1)?.marks || []);
+    setTranslation(d.attempts?.at(-1)?.translation || "");
+    setStart(null);
+    setShowCheck(false);
+    setDemo(false);
+  }
+  async function reveal(skip: boolean) {
+    if (!session) return;
+    await api(`/learning/english/syntax/${session.id}/attempt`, {
+      request_id: requestID(),
+      marks,
+      translation,
+      skip,
+    });
+    const d = await api<Session>(
+      `/learning/english/syntax/${session.id}/reveal`,
+      { request_id: requestID(), model_id: modelId },
+    );
+    install(d);
+  }
+  return (
+    <section className="panel glass syntax-lab">
+      <h2>先自己拆一句</h2>
+      <p>
+        点选一个词作为起点，再点终点，把片段标为主语、谓语、从句或修饰。也可先写翻译。
+      </p>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {!session ? (
+        <>
+          <label>
+            英语原句
+            <textarea
+              rows={4}
+              maxLength={1200}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                setSource("");
+              }}
+            />
+          </label>
+          <button
+            className="primary"
+            disabled={busy || text.trim().length < 5}
+            onClick={() =>
+              void act(async () =>
+                install(
+                  await api<Session>("/learning/english/syntax", {
+                    request_id: requestID(),
+                    text,
+                    source_attempt_id: source,
+                  }),
+                ),
+              )
+            }
+          >
+            开始独立拆句
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="setting-note">
+            {session.parent_id ? "新句验证 · 请重新独立尝试" : "独立尝试"}
+            {session.ai_generated ? " · AI 原创新句，语法等价尚待核验" : ""}
+          </p>
+          <div className="syntax-tokens" lang="en">
+            {tokens.map((t, i) => (
+              <button
+                key={i}
+                disabled={!!session.analysis || busy}
+                className={
+                  marks.some((m) => m.start <= t.start && m.end >= t.end)
+                    ? "marked-token"
+                    : ""
+                }
+                aria-label={`选择词 ${i + 1} ${t.text}`}
+                aria-pressed={start === i}
+                onClick={() => {
+                  if (start === null) setStart(i);
+                  else {
+                    const a = tokens[Math.min(start, i)],
+                      b = tokens[Math.max(start, i)];
+                    setMarks((v) => [
+                      ...v,
+                      { start: a.start, end: b.end, role },
+                    ]);
+                    setStart(null);
+                  }
+                }}
+              >
+                {t.text}
+              </button>
+            ))}
+          </div>
+          {!session.analysis ? (
+            <>
+              <label>
+                片段角色
+                <select value={role} onChange={(e) => setRole(e.target.value)}>
+                  {Object.entries(roles).map(([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p role="status">
+                {start === null
+                  ? "选择起点和终点。"
+                  : "再选片段终点；同一个词可以再点一次。"}
+              </p>
+              {marks.map((m, i) => (
+                <p key={i}>
+                  {roles[m.role]}：
+                  {Array.from(session.text).slice(m.start, m.end).join("")}{" "}
+                  <button
+                    aria-label={`移除标注 ${i + 1}`}
+                    onClick={() => setMarks((v) => v.filter((_, n) => n !== i))}
+                  >
+                    移除
+                  </button>
+                </p>
+              ))}
+              <label>
+                我的翻译
+                <textarea
+                  maxLength={2000}
+                  value={translation}
+                  onChange={(e) => setTranslation(e.target.value)}
+                />
+              </label>
+              <div className="button-row">
+                <button
+                  className="primary"
+                  disabled={
+                    busy || !modelId || (!marks.length && !translation.trim())
+                  }
+                  onClick={() => void act(() => reveal(false))}
+                >
+                  提交尝试并看反馈
+                </button>
+                <button
+                  disabled={busy || !modelId}
+                  onClick={() => void act(() => reveal(true))}
+                >
+                  跳过尝试，直接看讲解
+                </button>
+              </div>
+              {!modelId && <p>先选择一个有权限的助学模型，即可查看反馈。</p>}
+            </>
+          ) : (
+            <div className="sentence-analysis">
+              <h3>对照参考分析</h3>
+              <p>你的翻译：{translation || "本次跳过"}</p>
+              <p>AI 译文：{session.analysis.translation}</p>
+              <p>主干：{session.analysis.main_clause}</p>
+              {session.analysis.chunks.map((c, i) => (
+                <article key={i} className="evidence-card">
+                  <strong>
+                    {c.role} · {c.text}
+                  </strong>
+                  <p>{c.explanation}</p>
+                </article>
+              ))}
+              <p>{session.analysis.grammar.join("；")}</p>
+              <p>{session.analysis.check.question}</p>
+              <button onClick={() => setShowCheck((v) => !v)}>
+                {showCheck ? "收起答案" : "查看参考答案"}
+              </button>
+              {showCheck && (
+                <p>
+                  {session.analysis.check.answer} ·{" "}
+                  {session.analysis.check.explanation}
+                </p>
+              )}
+              <button onClick={() => setDemo((v) => !v)}>
+                {demo ? "收起动态演示" : "没理解，动态演示"}
+              </button>
+              {demo && timeline && <TimelinePlayer timeline={timeline} />}
+              <div className="button-row">
+                <button
+                  className="primary"
+                  disabled={busy || !modelId}
+                  onClick={() =>
+                    void act(async () => {
+                      const d = await api<{ id: string }>(
+                        `/learning/english/syntax/${session.id}/transfer`,
+                        { request_id: requestID(), model_id: modelId },
+                      );
+                      install(
+                        await api<Session>(`/learning/english/syntax/${d.id}`),
+                      );
+                    })
+                  }
+                >
+                  换新句验证
+                </button>
+                <button
+                  onClick={() => {
+                    setSession(null);
+                    setText("");
+                    setSource("");
+                  }}
+                >
+                  自主选择另一句
+                </button>
+              </div>
+              <p className="setting-note">
+                AI 分析是参考；新句尝试单独记录，不直接折算掌握率。
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
 }

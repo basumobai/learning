@@ -1,4 +1,54 @@
 "use client";
-import {useState} from "react";
-import {api} from "../../lib/api";
-export function RecallCardCreator({attemptId}:{attemptId:string}){const [front,setFront]=useState(""),[back,setBack]=useState(""),[status,setStatus]=useState(""),[busy,setBusy]=useState(false);return <details className="panel glass"><summary>把概念加入主动回忆</summary><p>适合短语、定义和公式条件；复杂解题用新题验证。</p><label>下次回忆的问题<input maxLength={1000} value={front} onChange={e=>setFront(e.target.value)}/></label><label>自己的简短答案<textarea maxLength={2000} value={back} onChange={e=>setBack(e.target.value)}/></label><button disabled={busy||!front.trim()||!back.trim()} onClick={async()=>{setBusy(true);try{await api("/learning/review-items",{attempt_id:attemptId,front,back});setFront("");setBack("");setStatus("已加入主动回忆。")}catch(e){setStatus((e as Error).message)}finally{setBusy(false)}}}>加入回忆</button><p role="status">{status}</p></details>}
+import { useState } from "react";
+import { api } from "../../lib/api";
+export function RecallCardCreator({ attemptId }: { attemptId: string }) {
+  const [front, setFront] = useState(""),
+    [back, setBack] = useState(""),
+    [status, setStatus] = useState(""),
+    [busy, setBusy] = useState(false);
+  return (
+    <details className="panel glass">
+      <summary>把概念加入主动回忆</summary>
+      <p>适合短语、定义和公式条件；复杂解题用新题验证。</p>
+      <label>
+        下次回忆的问题
+        <input
+          maxLength={1000}
+          value={front}
+          onChange={(e) => setFront(e.target.value)}
+        />
+      </label>
+      <label>
+        自己的简短答案
+        <textarea
+          maxLength={2000}
+          value={back}
+          onChange={(e) => setBack(e.target.value)}
+        />
+      </label>
+      <button
+        disabled={busy || !front.trim() || !back.trim()}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await api("/learning/review-items", {
+              attempt_id: attemptId,
+              front,
+              back,
+            });
+            setFront("");
+            setBack("");
+            setStatus("已加入主动回忆。");
+          } catch (e) {
+            setStatus((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        加入回忆
+      </button>
+      <p role="status">{status}</p>
+    </details>
+  );
+}
