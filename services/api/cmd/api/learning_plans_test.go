@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -46,4 +48,49 @@ func TestPlanningAndRecallIdempotency(t *testing.T) {
 	json.Unmarshal(p["id"], &pid)
 	b.call("PATCH", "/api/v1/learning/plans/"+pid, map[string]any{"request_id": "v3-plan-other", "version": 1, "skip_ids": []string{}}, 404)
 	a.call("GET", "/api/v1/learning/report", nil, 200)
+}
+
+func TestRecommendationsUseReviewedPrerequisitesAndKeepReplay(t *testing.T) {
+	t.Setenv("LEARNING_V3_SCORING", "true")
+	t.Setenv("LEARNING_V3_SKILLS", "true")
+	t.Setenv("LEARNING_V3_PLANNING", "true")
+	s, a, b := learningTestServer(t)
+	admin := curriculumAdmin(t, s)
+	if _, err := s.db.Exec(`INSERT INTO learning_terms(id,subject_id,kind,name) VALUES('physics-lenz','physics','knowledge','Synthetic Lenz prerequisite')`); err != nil {
+		t.Fatal(err)
+	}
+	q := learningInsertQuestion(t, s, "physics", "single_choice")
+	approveFixtureEvidence(t, s, q, []skillLink{{"physics-induction", "1", "primary"}})
+	base := learningInsertQuestion(t, s, "physics", "single_choice")
+	approveFixtureEvidence(t, s, base, []skillLink{{"physics-lenz", "1", "primary"}})
+	admin.call("POST", "/api/v1/admin/learning/skill-prerequisites", map[string]string{"skill_id": "physics-induction", "prerequisite_id": "physics-lenz"}, 200)
+	admin.call("POST", "/api/v1/admin/learning/skill-prerequisites", map[string]string{"skill_id": "physics-lenz", "prerequisite_id": "physics-induction"}, 400)
+	start := a.call("POST", "/api/v1/learning/attempts", map[string]string{"subject_id": "physics", "kind": "single_choice", "question_id": q, "request_id": "recommend-weak-start"}, 200)
+	aid := rawString(start, "id")
+	a.call("POST", "/api/v1/learning/attempts/"+aid+"/submit", map[string]any{"answers": map[string]string{"1": "B"}}, 200)
+	if err := s.processEvidenceOutbox(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a.call("POST", "/api/v1/learning/attempts/"+aid+"/mistakes", map[string]any{"request_id": "recommend-confirm", "action": "correct", "type_id": "concept", "expected_version": 0}, 200)
+	request := map[string]any{"request_id": "recommend-prerequisite", "subjects": []string{"physics"}, "limit": 2}
+	out := a.call("POST", "/api/v1/learning/recommendations", request, 200)
+	var selected []selectionCandidate
+	if err := json.Unmarshal(out["selected"], &selected); err != nil || len(selected) != 2 {
+		t.Fatal(string(out["selected"]), err)
+	}
+	if selected[0].ID != base || !strings.Contains(strings.Join(selected[0].Reasons, " "), "前置知识") || selected[0].RuleID == "" || selected[0].LinkID == "" {
+		t.Fatal(selected)
+	}
+	if !strings.Contains(strings.Join(selected[1].Reasons, " "), "确认了相关错因") {
+		t.Fatal(selected[1])
+	}
+	replay := a.call("POST", "/api/v1/learning/recommendations", request, 200)
+	if string(replay["selected"]) != string(out["selected"]) {
+		t.Fatal("recommendation replay changed")
+	}
+	request["request_id"] = "recommend-other-account"
+	other := b.call("POST", "/api/v1/learning/recommendations", request, 200)
+	if strings.Contains(string(other["selected"]), "前置知识") || strings.Contains(string(other["selected"]), "确认了相关错因") {
+		t.Fatal("cross-account recommendation signals")
+	}
 }

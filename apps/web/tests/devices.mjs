@@ -27,6 +27,8 @@ const configurations = [
   { name: "tablet-split", width: 600, height: 900, touch: true },
   { name: "navigation-boundary", width: 701, height: 900, touch: true },
   { name: "desktop", width: 1440, height: 1000, touch: false },
+  { name: "wide-desktop", width: 1920, height: 1080, touch: false },
+  { name: "large-display", width: 2560, height: 1440, touch: false },
 ];
 const pages = [
   "/",
@@ -37,6 +39,10 @@ const pages = [
   "/assistant#sentence",
   "/vocabulary",
   "/settings",
+  "/progress",
+  "/review",
+  "/exams",
+  "/admin/engine",
   "/admin",
   "/admin/learning",
 ];
@@ -519,7 +525,7 @@ try {
   await firstLogin.context.close();
   assert.deepEqual(failures, []);
   console.log(
-    `Device UI: ${checks} checks passed across 8 viewports, touch/keyboard, rotation, viewport keyboard and draft navigation (mock API).`,
+    `Device UI: ${checks} checks passed across ${configurations.length} viewports, touch/keyboard, rotation, viewport keyboard and draft navigation (mock API).`,
   );
 } catch (error) {
   if (debugPage && !debugPage.isClosed())

@@ -88,7 +88,7 @@ func (s *server) queueEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_evaluation_runs(id,case_id,model_id,model_version,prompt,prompt_hash,request_id,reviewer_id,digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(reviewer_id,request_id) DO NOTHING`, id, in.Case, in.Model, model.version, in.Prompt, payloadDigest(in.Prompt), in.Request, userID(r.Context()), digest)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_evaluation_runs(id,case_id,model_id,model_version,prompt,prompt_hash,request_id,reviewer_id,digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(reviewer_id,request_id) DO NOTHING`, id, in.Case, in.Model, evaluationModelVersion(model), in.Prompt, payloadDigest(in.Prompt), in.Request, userID(r.Context()), digest)
 	var prior string
 	if err == nil {
 		err = tx.QueryRowContext(r.Context(), `SELECT id,digest FROM learning_evaluation_runs WHERE reviewer_id=$1 AND request_id=$2`, userID(r.Context()), in.Request).Scan(&id, &prior)
@@ -124,7 +124,7 @@ func (s *server) runEvaluation(ctx context.Context, id string) (any, error) {
 		return nil, err
 	}
 	model, err := s.learningModel(ctx, modelID)
-	if err != nil || model.version != version {
+	if err != nil || evaluationModelVersion(model) != version {
 		return nil, fmt.Errorf("模型配置已变化，请创建新评测")
 	}
 	model.budgetTask = "model_evaluation"
@@ -171,6 +171,15 @@ func (s *server) reviewEvaluation(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "evaluation review", err)
 		return
 	}
+	var decision, note string
+	if err = s.db.QueryRowContext(r.Context(), `SELECT decision,note FROM learning_evaluation_reviews WHERE run_id=$1`, r.PathValue("id")).Scan(&decision, &note); err != nil {
+		s.dbError(w, "evaluation review replay", err)
+		return
+	}
+	if decision != in.Decision || note != in.Note {
+		fail(w, 409, "本次评测已有不可变人工结论，请重新运行评测")
+		return
+	}
 	respond(w, 200, map[string]bool{"saved": true})
 }
 func (s *server) requireModelEvaluation(ctx context.Context, task, prompt string, ids []int64) error {
@@ -183,7 +192,7 @@ func (s *server) requireModelEvaluation(ctx context.Context, task, prompt string
 			return err
 		}
 		var approved bool
-		err = s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM learning_evaluation_runs r JOIN learning_evaluation_cases c ON c.id=r.case_id JOIN learning_evaluation_reviews v ON v.run_id=r.id WHERE r.model_id=$1 AND r.model_version=$2 AND r.prompt_hash=$3 AND c.task=$4 AND v.decision='approved')`, id, model.version, payloadDigest(prompt), task).Scan(&approved)
+		err = s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM learning_evaluation_runs r JOIN learning_evaluation_cases c ON c.id=r.case_id JOIN learning_evaluation_reviews v ON v.run_id=r.id WHERE r.model_id=$1 AND r.model_version=$2 AND r.prompt_hash=$3 AND c.task=$4 AND v.decision='approved')`, id, evaluationModelVersion(model), payloadDigest(prompt), task).Scan(&approved)
 		if err != nil {
 			return err
 		}
@@ -192,4 +201,8 @@ func (s *server) requireModelEvaluation(ctx context.Context, task, prompt string
 		}
 	}
 	return nil
+}
+
+func evaluationModelVersion(m aiModel) string {
+	return payloadDigest([]any{m.ModelID, m.version, m.baseURL, m.jsonMode})
 }

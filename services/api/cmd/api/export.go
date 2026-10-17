@@ -22,5 +22,16 @@ func (s *server) exportAccount(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "account export", err)
 		return
 	}
-	respond(w, 200, raw)
+	learning, err := learningExport(r.Context(), s.db)
+	if err != nil {
+		s.dbError(w, "learning export", err)
+		return
+	}
+	var result map[string]json.RawMessage
+	if json.Unmarshal(raw, &result) != nil {
+		fail(w, 500, "导出数据无效")
+		return
+	}
+	result["learning_v3"] = learning
+	respond(w, 200, result)
 }

@@ -1,4 +1,46 @@
 "use client";
-type Evidence={id:string;score:number;max_score:number;confidence:string;created_at:string;engine_version:string;note:string;supersedes_id?:string};
-const confidence:Record<string,string>={verified_rule:"已审核规则",human_confirmed:"人工确认",unresolved:"待人工核验",legacy:"旧版评分"};
-export function ScoreEvidence({evidence}:{evidence:Evidence[]}){if(!evidence?.length)return null;const latest=evidence.find(e=>!evidence.some(n=>n.supersedes_id===e.id))||evidence.at(-1)!;return <section className="panel glass"><h3>评分依据</h3><p><strong>{latest.score} / {latest.max_score}</strong> · {confidence[latest.confidence]||latest.confidence}</p><p className="setting-note">AI 参考评价与正式评分分别保存，历史评分可回看。</p><details><summary>评分记录（{evidence.length}）</summary>{evidence.map(e=><p key={e.id}>{new Date(e.created_at).toLocaleString()} · {e.score}/{e.max_score} · {confidence[e.confidence]} · {e.note}</p>)}</details></section>}
+type Evidence = {
+  id: string;
+  score: number;
+  max_score: number;
+  confidence: string;
+  created_at: string;
+  engine_version: string;
+  note: string;
+  supersedes_id?: string;
+};
+const confidence: Record<string, string> = {
+  verified_rule: "已审核规则",
+  human_confirmed: "人工确认",
+  unresolved: "待人工核验",
+  legacy: "旧版评分",
+};
+export function ScoreEvidence({ evidence }: { evidence: Evidence[] }) {
+  if (!evidence?.length) return null;
+  const latest =
+    evidence.find((e) => !evidence.some((n) => n.supersedes_id === e.id)) ||
+    evidence.at(-1)!;
+  return (
+    <section className="panel glass">
+      <h3>评分依据</h3>
+      <p>
+        <strong>
+          {latest.score} / {latest.max_score}
+        </strong>{" "}
+        · {confidence[latest.confidence] || latest.confidence}
+      </p>
+      <p className="setting-note">
+        AI 参考评价与正式评分分别保存，历史评分可回看。
+      </p>
+      <details>
+        <summary>评分记录（{evidence.length}）</summary>
+        {evidence.map((e) => (
+          <p key={e.id}>
+            {new Date(e.created_at).toLocaleString()} · {e.score}/{e.max_score}{" "}
+            · {confidence[e.confidence]} · {e.note}
+          </p>
+        ))}
+      </details>
+    </section>
+  );
+}

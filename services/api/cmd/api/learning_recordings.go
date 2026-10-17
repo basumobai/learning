@@ -191,7 +191,7 @@ func (s *server) transcribeRecording(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current, err := s.allowedModel(r.Context(), in.Model, "asr")
-	if err != nil || current.version != model.version {
+	if err != nil || evaluationModelVersion(current) != evaluationModelVersion(model) {
 		fail(w, 403, "转写模型授权或配置已改变")
 		return
 	}
@@ -202,7 +202,7 @@ func (s *server) transcribeRecording(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	id := security.Token(18)
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_transcriptions(id,recording_id,user_id,model_id,model_version,text,request_id,digest,elapsed_ms) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, r.PathValue("id"), userID(r.Context()), in.Model, model.version, out.Text, in.Request, payloadDigest(in), min(time.Since(started).Milliseconds(), 2147483647))
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO learning_transcriptions(id,recording_id,user_id,model_id,model_version,text,request_id,digest,elapsed_ms) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, r.PathValue("id"), userID(r.Context()), in.Model, evaluationModelVersion(model), out.Text, in.Request, payloadDigest(in), min(time.Since(started).Milliseconds(), 2147483647))
 	result := map[string]any{"id": id, "text": out.Text, "confidence": "asr_unverified", "note": "自动转写需要核对；不代表官方听说或发音评分"}
 	if err == nil {
 		err = finishAI(r.Context(), tx, in.Request, result)

@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+import { installMockAPI } from "./mock-api.mjs";
+const browser = await chromium.launch({
+  headless: true,
+  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+  args: ["--no-sandbox"],
+});
+try {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    serviceWorkers: "block",
+  });
+  const fixtures = await installMockAPI(context);
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(
+    (process.env.UI_BASE || "http://127.0.0.1:3007") +
+      "/practice?subject=english",
+  );
+  await page.getByRole("button", { name: "开始练习", exact: true }).click();
+  await page.locator(".question-choices label").nth(1).click();
+  let body;
+  const abort = async (route) => {
+    body = route.request().postDataJSON();
+    await route.abort("failed");
+  };
+  await context.route("**/api/v1/learning/attempts/attempt1/submit", abort);
+  await page.getByRole("button", { name: "提交作答", exact: true }).click();
+  await page.getByRole("button", { name: "重试交卷", exact: true }).waitFor();
+  const original = body.client_request_id;
+  assert.ok(original);
+  assert.equal(body.answers["1"], "B");
+  await page.reload();
+  await page.getByRole("button", { name: "重试交卷", exact: true }).waitFor();
+  const stored = await page.evaluate(() =>
+    Object.entries(localStorage).filter(([k]) =>
+      k.startsWith("learning-draft-v1:"),
+    ),
+  );
+  assert.equal(stored.length, 1);
+  assert.equal(
+    JSON.parse(stored[0][1]).pending_submission.client_request_id,
+    original,
+  );
+  await context.unroute("**/api/v1/learning/attempts/attempt1/submit", abort);
+  await page.getByRole("button", { name: "重试交卷", exact: true }).click();
+  await page.getByRole("heading", { name: "这次卡在哪里？" }).waitFor();
+  const accepted = fixtures.requests.filter((r) => r.path.endsWith("/submit"));
+  if (accepted.length)
+    assert.equal(accepted.at(-1).body.client_request_id, original);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        Object.keys(localStorage).filter((k) =>
+          k.startsWith("learning-draft-v1:"),
+        ).length,
+    ),
+    0,
+  );
+  assert.deepEqual(errors, []);
+  await context.close();
+  console.log(
+    "Weak-network browser: frozen payload survives reload, replay keeps key, confirmed submission clears private draft.",
+  );
+} finally {
+  await browser.close();
+}

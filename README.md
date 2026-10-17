@@ -71,6 +71,10 @@ WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai
 
 | 功能 | 入口 |
 | --- | --- |
+| 今天计划、错题与知识证据 | `/progress` |
+| 主动回忆与FSRS撤销 | `/review` |
+| 已审核分年份整卷模拟 | `/exams` |
+| 评分规则、知识映射与教学质量 | `/admin/engine` |
 | 六科练习与动态讲解 | `/` → 选择科目、开始练习 |
 | 词汇复习 | `/english` |
 | 限时四选一 | `/challenge` |
@@ -83,6 +87,7 @@ WEB_PORT=9090 API_PORT=9009 bash scripts/install.sh --origin https://www.sumobai
 | 任务、Worker状态与恢复 | `/admin/resources/jobs` |
 | 旧双PDF与多学科兼容配置 | `/admin/learning` |
 
+- [v3.1操作与验收](docs/v3/OPERATIONS.md) · [实际验证记录](docs/v3/VALIDATION.md)
 - [v2操作与升级](docs/v2/OPERATIONS.md) · [审计与设计](docs/v2/P0_AUDIT.md) · [分阶段验证](docs/v2/VALIDATION.md)
 - [功能与学习流程](docs/LEARNING.md) · [界面设计](docs/FRONTEND.md) · [安全与账号](docs/SECURITY.md)
 - [架构](docs/ARCHITECTURE.md) · [API](docs/API.md) · [数据库](docs/DATABASE.md) · [AI 设计](docs/AI.md) · [产品行为](docs/PRODUCT.md)

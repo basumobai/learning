@@ -1,4 +1,11 @@
 "use client";
+import {
+  readDraft,
+  writeDraft,
+  removeDraft,
+  sameAnswers,
+  type PendingSubmission,
+} from "../../lib/offline";
 import { GuidedTutor } from "../components/GuidedTutor";
 import { ScoreEvidence } from "../components/ScoreEvidence";
 import { RecallCardCreator } from "../components/RecallCardCreator";
@@ -6,7 +13,13 @@ import { MistakePanel } from "../components/MistakePanel";
 import { MathText } from "../components/MathText";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, requestID, upload, saveBeforeLeave } from "../../lib/api";
+import {
+  api,
+  APIError,
+  requestID,
+  upload,
+  saveBeforeLeave,
+} from "../../lib/api";
 import {
   subjects,
   hanCount,
@@ -75,7 +88,17 @@ type Feedback = {
   }[];
 };
 type Attempt = {
- score_evidence?: {id:string;score:number;max_score:number;confidence:string;created_at:string;engine_version:string;note:string;supersedes_id?:string}[];
+  exam_session_id?: string;
+  score_evidence?: {
+    id: string;
+    score: number;
+    max_score: number;
+    confidence: string;
+    created_at: string;
+    engine_version: string;
+    note: string;
+    supersedes_id?: string;
+  }[];
   draft_version?: number;
   id: string;
   question: {
@@ -101,6 +124,13 @@ type Attempt = {
 };
 export default function Practice() {
   const auth = useProtected();
+  const [pendingSync, setPendingSync] = useState(false),
+    [draftConflict, setDraftConflict] = useState(false);
+  const expiredOnce = useRef("");
+  const userRef = useRef("");
+  userRef.current = auth.user?.id || "";
+  const draftBase = useRef(0),
+    pendingSubmission = useRef<PendingSubmission | null>(null);
   const [modelOptions, setModelOptions] = useState<ModelOptions | null>(null);
   const [modelSelection, setModelSelection] = useState<ModelSelection>({
     model_id: 0,
@@ -156,10 +186,41 @@ export default function Practice() {
     setKind(a.question.kind);
     setAttempt(a);
     draftVersion.current = a.draft_version || 0;
-    setAnswers(a.answers || a.draft || {});
-    offset.current = Date.parse(a.server_time) - Date.now();
+    draftBase.current = a.draft_version || 0;
+    const local = !a.exam_session_id ? readDraft(userRef.current, a.id) : null;
+    let restored = a.answers || a.draft || {};
     dirty.current = false;
+    setDraftConflict(false);
+    pendingSubmission.current = null;
+    setPendingSync(false);
     setSaving("");
+    if (a.submitted_at || a.exam_session_id) {
+      removeDraft(userRef.current, a.id);
+    } else if (local) {
+      if (local.pending_submission) {
+        pendingSubmission.current = local.pending_submission;
+        submissionRequest.current = local.pending_submission.client_request_id;
+        setPendingSync(true);
+        restored = local.pending_submission.answers;
+        setSaving("上次交卷尚待确认，请重试或核对服务器记录");
+      } else if (local.base_version === draftBase.current) {
+        restored = local.answers;
+        draftVersion.current = local.version;
+        dirty.current = true;
+        setSaving("已恢复本机草稿，等待与服务器同步");
+      } else if (
+        local.version === draftBase.current &&
+        sameAnswers(local.answers, a.draft || {})
+      ) {
+        removeDraft(userRef.current, a.id);
+      } else {
+        setDraftConflict(true);
+        setSaving("本机与服务器草稿不同，请核对后选择。");
+      }
+    }
+    setAnswers(restored);
+    answersRef.current = restored;
+    offset.current = Date.parse(a.server_time) - Date.now();
     const existing = a.jobs?.filter((j) => j.kind === "explanation").at(-1);
     if (existing) {
       explanationRequested.current = a.id;
@@ -305,16 +366,31 @@ export default function Practice() {
   ]);
   const saveDraft = useCallback(async () => {
     const a = attemptRef.current;
-    if (!a || a.submitted_at || !dirty.current) return;
+    if (!a || a.submitted_at || !dirty.current || pendingSubmission.current)
+      return;
     const current = answersRef.current;
+    const version = draftVersion.current;
+    const base = draftBase.current;
     try {
       await api(`/learning/attempts/${a.id}/draft`, {
         answers: current,
-        version: draftVersion.current,
+        version,
+        base_version: base,
       });
       if (attemptRef.current?.id !== a.id) return;
-      if (current === answersRef.current) dirty.current = false;
-      setSaving("已保存");
+      draftBase.current = Math.max(draftBase.current, version);
+      if (current === answersRef.current && !pendingSubmission.current) {
+        dirty.current = false;
+        removeDraft(userRef.current, a.id);
+      } else if (!a.exam_session_id && !pendingSubmission.current)
+        writeDraft({
+          user_id: userRef.current,
+          attempt_id: a.id,
+          base_version: draftBase.current,
+          version: draftVersion.current,
+          answers: answersRef.current,
+        });
+      setSaving("已保存到服务器");
     } catch (e) {
       if (attemptRef.current?.id !== a.id) return;
       setSaving((e as Error).message);
@@ -331,6 +407,7 @@ export default function Practice() {
         saveBeforeLeave(`/learning/attempts/${a.id}/draft`, {
           answers: answersRef.current,
           version: draftVersion.current,
+          base_version: draftBase.current,
         });
     };
     const background = () => {
@@ -377,15 +454,42 @@ export default function Practice() {
       if (!a.deadline || Date.now() + offset.current < Date.parse(a.deadline))
         await saveDraft();
       if (!submissionRequest.current) submissionRequest.current = requestID();
-      const next = await api<Attempt>(`/learning/attempts/${a.id}/submit`, {
+      const body = pendingSubmission.current || {
         client_request_id: submissionRequest.current,
         answers: answersRef.current,
         personal,
         model_selection: modelOptions ? modelSelection : undefined,
-      });
+      };
+      if (!a.exam_session_id) {
+        pendingSubmission.current = body;
+        setPendingSync(true);
+        writeDraft({
+          user_id: userRef.current,
+          attempt_id: a.id,
+          base_version: draftBase.current,
+          version: Math.max(1, draftVersion.current),
+          answers: answersRef.current,
+          pending_submission: body,
+        });
+      }
+      const next = await api<Attempt>(
+        `/learning/attempts/${a.id}/submit`,
+        body,
+      );
       install(next);
       if (job?.id) setJob(await api<Job>(`/learning/jobs/${job.id}`));
     } catch (e) {
+      if (e instanceof APIError && e.status === 400) {
+        pendingSubmission.current = null;
+        setPendingSync(false);
+        writeDraft({
+          user_id: userRef.current,
+          attempt_id: a.id,
+          base_version: draftBase.current,
+          version: Math.max(1, draftVersion.current),
+          answers: answersRef.current,
+        });
+      }
       setError((e as Error).message);
     } finally {
       submitRef.current = false;
@@ -401,12 +505,23 @@ export default function Practice() {
       const left =
         (Date.parse(attempt.deadline!) - Date.now() - offset.current) / 1000;
       setSeconds(Math.max(0, left));
-      if (left <= 0) void submit();
+      if (left <= 0 && expiredOnce.current !== attempt.id) {
+        expiredOnce.current = attempt.id;
+        void submit();
+      }
     };
     tick();
     const timer = setInterval(tick, 300);
     return () => clearInterval(timer);
   }, [attempt?.id, attempt?.deadline, attempt?.submitted_at, submit]);
+  useEffect(() => {
+    const online = () => {
+      if (pendingSubmission.current) void submit();
+      else void saveDraft();
+    };
+    window.addEventListener("online", online);
+    return () => window.removeEventListener("online", online);
+  }, [submit, saveDraft]);
   async function start() {
     if (busy) return;
     setBusy(true);
@@ -442,9 +557,21 @@ export default function Practice() {
     }
   }
   function answer(id: string, text: string) {
+    if (pendingSubmission.current) return;
     submissionRequest.current = "";
     draftVersion.current++;
-    setAnswers((v) => ({ ...v, [id]: text }));
+    const next = { ...answersRef.current, [id]: text };
+    setAnswers(next);
+    answersRef.current = next;
+    const a = attemptRef.current;
+    if (a && !a.exam_session_id)
+      writeDraft({
+        user_id: userRef.current,
+        attempt_id: a.id,
+        base_version: draftBase.current,
+        version: draftVersion.current,
+        answers: next,
+      });
     dirty.current = true;
     setSaving("等待保存…");
   }
@@ -557,6 +684,68 @@ export default function Practice() {
           <p className="error" role="alert">
             {error}
           </p>
+        )}
+        {pendingSync && attempt && !submitted && (
+          <section className="panel glass">
+            <p>这次交卷尚未确认，重试沿用原请求和答案。</p>
+            <div className="button-row">
+              <button disabled={busy} onClick={() => void submit()}>
+                重试交卷
+              </button>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void api<Attempt>(`/learning/attempts/${attempt.id}`)
+                    .then(install)
+                    .catch((e) => setError(e.message))
+                }
+              >
+                核对服务器记录
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  removeDraft(userRef.current, attempt.id);
+                  pendingSubmission.current = null;
+                  setPendingSync(false);
+                  void api<Attempt>(`/learning/attempts/${attempt.id}`)
+                    .then(install)
+                    .catch((e) => setError(e.message));
+                }}
+              >
+                使用服务器草稿
+              </button>
+            </div>
+          </section>
+        )}
+        {draftConflict && attempt && (
+          <section className="panel glass">
+            <p>服务器保留了另一份草稿。本机草稿尚未覆盖它。</p>
+            <button
+              onClick={() => {
+                const local = readDraft(userRef.current, attempt.id);
+                if (local) {
+                  const next = local.answers;
+                  setAnswers(next);
+                  answersRef.current = next;
+                  draftVersion.current =
+                    Math.max(draftVersion.current, local.version) + 1;
+                  dirty.current = true;
+                  setDraftConflict(false);
+                }
+              }}
+            >
+              确认采用本机草稿
+            </button>
+            <button
+              onClick={() => {
+                removeDraft(userRef.current, attempt.id);
+                setDraftConflict(false);
+              }}
+            >
+              保留服务器草稿
+            </button>
+          </section>
         )}
         {!attempt && (
           <div className="practice-setup">
@@ -800,10 +989,25 @@ export default function Practice() {
         )}
         {attempt && (
           <>
-            {submitted && <MistakePanel attemptId={attempt.id} subject={attempt.question.subject_id} />}
+            {submitted && (
+              <MistakePanel
+                attemptId={attempt.id}
+                subject={attempt.question.subject_id}
+                selection={modelOptions ? modelSelection : undefined}
+                personal={personal}
+              />
+            )}
             {submitted && <RecallCardCreator attemptId={attempt.id} />}
-            {submitted && <ScoreEvidence evidence={attempt.score_evidence||[]} />}
-            {submitted && <GuidedTutor attemptId={attempt.id} selection={modelSelection} personal={personal} />}
+            {submitted && (
+              <ScoreEvidence evidence={attempt.score_evidence || []} />
+            )}
+            {submitted && (
+              <GuidedTutor
+                attemptId={attempt.id}
+                selection={modelSelection}
+                personal={personal}
+              />
+            )}
             {submitted && (
               <nav className="review-jumps" aria-label="本题复习">
                 <a href="#practice-feedback">查看作答反馈</a>
@@ -922,7 +1126,7 @@ export default function Practice() {
                                   : "radio"
                               }
                               name={`part-${p.id}`}
-                              disabled={submitted || busy}
+                              disabled={submitted || busy || pendingSync}
                               checked={(answers[p.id] || "")
                                 .split(",")
                                 .includes(c.id)}
@@ -950,7 +1154,7 @@ export default function Practice() {
                         aria-label={`第${p.id}题作答`}
                         rows={essay ? 18 : 5}
                         value={answers[p.id] || ""}
-                        disabled={submitted || busy}
+                        disabled={submitted || busy || pendingSync}
                         maxLength={12000}
                         onChange={(e) => answer(p.id, e.target.value)}
                         placeholder="写下你的思路与答案…"

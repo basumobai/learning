@@ -57,9 +57,9 @@ func (s *server) approveScoringRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	var raw []byte
+	var raw, solutionRaw []byte
 	var current int
-	err = tx.QueryRowContext(r.Context(), `SELECT content,revision FROM learning_questions WHERE id=$1 AND status='published' FOR UPDATE`, r.PathValue("id")).Scan(&raw, &current)
+	err = tx.QueryRowContext(r.Context(), `SELECT content,revision,solution FROM learning_questions WHERE id=$1 AND status='published' FOR UPDATE`, r.PathValue("id")).Scan(&raw, &current, &solutionRaw)
 	if err != nil {
 		fail(w, 404, "已发布题目不存在")
 		return
@@ -76,6 +76,28 @@ func (s *server) approveScoringRule(w http.ResponseWriter, r *http.Request) {
 	if err = in.Rule.Validate(c); err != nil {
 		fail(w, 400, err.Error())
 		return
+	}
+	var solution platform.Solution
+	if json.Unmarshal(solutionRaw, &solution) != nil {
+		fail(w, 409, "原题参考答案无效")
+		return
+	}
+	for _, part := range in.Rule.Parts {
+		if part.Mode == "manual" {
+			continue
+		}
+		probe := platform.ScoringRule{Parts: []platform.ScoringPart{part}}
+		var content platform.Content
+		for _, p := range c.Parts {
+			if p.ID == part.ID {
+				content = platform.Content{Parts: []platform.Part{p}}
+			}
+		}
+		scored, e := probe.Score(content, map[string]string{part.ID: solution.Answers[part.ID]})
+		if e != nil || len(scored.Parts) != 1 || !scored.Parts[0].Correct {
+			fail(w, 400, "新规则与原题参考答案矛盾；请先修订题目答案，再审核评分规则")
+			return
+		}
 	}
 	total := 0.0
 	for _, p := range c.Parts {

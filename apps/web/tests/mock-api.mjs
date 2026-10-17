@@ -213,6 +213,15 @@ export async function installMockAPI(context, options = {}) {
       data = { answer: "先看helped的主语，再暂时遮住that从句。" };
     else if (p === "/learning/attempts/attempt1") data = attempt();
     else if (p === "/learning/attempts/attempt1/mistakes") data = {types:[{id:"sentence_core",name:"句子主干"}],candidates:[],events:[]};
+    else if (p === "/learning/exams/active") data={exam:null};
+    else if (p === "/learning/exams/options") data={rules:[]};
+    else if (p === "/learning/report") data={summary:{submitted:0,independent:0,hinted:0,transfer:0,seconds:0},skills:[],subjects:[],note:"合成测试数据"};
+    else if (p === "/learning/plans/today") data={plan:null};
+    else if (p === "/learning/review-items") data={items:[]};
+    else if (p === "/learning/mistakes") data={attempts:[]};
+    else if (p === "/learning/attempts/attempt1/tutor") data={steps:[],state:"diagnosis"};
+    else if (p === "/admin/learning/evaluations") data={cases:[],runs:[]};
+    else if (p === "/admin/learning/operations") data={flags:{SCORING:false},missing_question_snapshots:0};
     else if (p === "/learning/english/syntax") data = {id:"syntax1",text:body.text,analysis:null,attempts:[]};
     else if (p === "/learning/english/syntax/syntax1/attempt") data = {saved:true};
     else if (p === "/learning/english/syntax/syntax1/reveal") data = {id:"syntax1",text:question.content.passage,attempts:[{marks:[],translation:"你借给我的书帮助了我。"}],analysis:{translation:"你借给我的书帮助了我。",main_clause:"The book helped me.",chunks:[{text:"The book",role:"主语",explanation:"书帮助了我"}],grammar:["定语从句"],paraphrase:"Your book helped me.",check:{question:"什么帮助了我？",answer:"那本书",explanation:"book是主语"}}};
