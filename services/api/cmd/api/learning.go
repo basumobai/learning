@@ -15,6 +15,7 @@ import (
 )
 
 func (s *server) learningRoutes(m *http.ServeMux) {
+	s.scoringRoutes(m)
 	m.HandleFunc("GET /api/v1/learning/catalog", s.learningCatalog)
 	m.HandleFunc("POST /api/v1/learning/attempts", s.startLearningAttempt)
 	m.HandleFunc("GET /api/v1/learning/attempts/{id}", s.getLearningAttempt)
@@ -111,6 +112,8 @@ type learningQuestion struct {
 	Provenance json.RawMessage   `json:"provenance"`
 }
 type learningAttempt struct {
+	RuleID            string            `json:"scoring_rule_revision_id,omitempty"`
+	Scores            json.RawMessage   `json:"score_evidence,omitempty"`
 	DraftVersion      int64             `json:"draft_version"`
 	Jobs              json.RawMessage   `json:"jobs"`
 	ID                string            `json:"id"`
@@ -128,7 +131,7 @@ type learningAttempt struct {
 func (s *server) loadAttempt(ctx context.Context, id string) (learningAttempt, error) {
 	a := learningAttempt{ID: id, ServerTime: time.Now()}
 	var c, sol, answers, draft, feedback []byte
-	err := s.db.QueryRowContext(ctx, `SELECT q.question_id,q.subject_id,COALESCE(q.chapter_id,''),q.kind,q.content,q.solution,q.revision,q.provenance,a.started_at,a.deadline,a.submitted_at,a.answers,a.draft_answers,a.feedback,a.draft_version FROM learning_attempts a JOIN learning_question_revisions q ON q.question_id=a.question_id AND q.revision=a.question_revision WHERE a.id=$1 AND a.user_id=$2`, id, userID(ctx)).Scan(&a.Question.ID, &a.Question.Subject, &a.Question.Chapter, &a.Question.Kind, &c, &sol, &a.Question.Revision, &a.Question.Provenance, &a.Started, &a.Deadline, &a.Submitted, &answers, &draft, &feedback, &a.DraftVersion)
+	err := s.db.QueryRowContext(ctx, `SELECT q.question_id,q.subject_id,COALESCE(q.chapter_id,''),q.kind,q.content,q.solution,q.revision,q.provenance,a.started_at,a.deadline,a.submitted_at,a.answers,a.draft_answers,a.feedback,a.draft_version,COALESCE(a.scoring_rule_revision_id,'') FROM learning_attempts a JOIN learning_question_revisions q ON q.question_id=a.question_id AND q.revision=a.question_revision WHERE a.id=$1 AND a.user_id=$2`, id, userID(ctx)).Scan(&a.Question.ID, &a.Question.Subject, &a.Question.Chapter, &a.Question.Kind, &c, &sol, &a.Question.Revision, &a.Question.Provenance, &a.Started, &a.Deadline, &a.Submitted, &answers, &draft, &feedback, &a.DraftVersion, &a.RuleID)
 	if err != nil {
 		return a, err
 	}
@@ -139,6 +142,11 @@ func (s *server) loadAttempt(ctx context.Context, id string) (learningAttempt, e
 	_ = json.Unmarshal(draft, &a.Draft)
 	if err = s.db.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_object('id',id,'kind',kind,'status',status,'error',error) ORDER BY created_at,id),'[]') FROM learning_jobs WHERE owner_id=$1 AND payload->>'attempt_id'=$2 AND kind IN ('grade','essay','explanation')`, userID(ctx), id).Scan(&a.Jobs); err != nil {
 		return a, err
+	}
+	if a.Submitted != nil {
+		if err = s.db.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(e) ORDER BY created_at,id),'[]') FROM learning_score_evidence e WHERE attempt_id=$1`, id).Scan(&a.Scores); err != nil {
+			return a, err
+		}
 	}
 	a.Feedback = feedback
 	a.ExplanationNeeded = learningExplanationNeeded(a)
@@ -183,9 +191,19 @@ func (s *server) startLearningAttempt(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "英语教材固定北师大版2019")
 		return
 	}
+	in.Chapters = canonicalIDs(in.Chapters)
+	fingerprint := payloadDigest(struct {
+		Subject, Kind, Textbook, Term, Edition, Volume string
+		Chapters                                       []string
+	}{in.Subject, in.Kind, in.Textbook, in.Term, in.Edition, in.Volume, in.Chapters})
 	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM learning_attempts WHERE user_id=$1 AND request_id=$2`, userID(r.Context()), in.RequestID).Scan(&existing)
+	var previous sql.NullString
+	err := s.db.QueryRowContext(r.Context(), `SELECT id,creation_digest FROM learning_attempts WHERE user_id=$1 AND request_id=$2`, userID(r.Context()), in.RequestID).Scan(&existing, &previous)
 	if err == nil {
+		if previous.Valid && previous.String != fingerprint {
+			fail(w, 409, "同一请求标识的选题范围发生改变")
+			return
+		}
 		r.SetPathValue("id", existing)
 		s.getLearningAttempt(w, r)
 		return
@@ -217,12 +235,19 @@ func (s *server) startLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	if in.Subject == "chinese" && (in.Kind == "essay" || in.Kind == "poetry" || strings.Contains(in.Kind, "reading")) {
 		seconds = 1800
 	}
-	_, err = s.db.ExecContext(r.Context(), `INSERT INTO learning_attempts(id,user_id,question_id,question_revision,request_id,deadline) VALUES($1,$2,$3,$4,$5,CASE WHEN $6::int>0 THEN now()+make_interval(secs=>$6) END) ON CONFLICT(user_id,request_id) DO NOTHING`, id, userID(r.Context()), qid, rev, in.RequestID, seconds)
+	_, err = s.db.ExecContext(r.Context(), `INSERT INTO learning_attempts(id,user_id,question_id,question_revision,request_id,deadline,creation_digest,scoring_rule_revision_id) VALUES($1,$2,$3,$4,$5,CASE WHEN $6::int>0 THEN now()+make_interval(secs=>$6) END,$7,(SELECT id FROM learning_scoring_rule_revisions WHERE question_id=$3 AND question_revision=$4 AND $8 ORDER BY revision DESC LIMIT 1)) ON CONFLICT(user_id,request_id) DO NOTHING`, id, userID(r.Context()), qid, rev, in.RequestID, seconds, fingerprint, v3Enabled("SCORING"))
 	if err != nil {
 		s.dbError(w, "start attempt", err)
 		return
 	}
-	_ = s.db.QueryRowContext(r.Context(), `SELECT id FROM learning_attempts WHERE user_id=$1 AND request_id=$2`, userID(r.Context()), in.RequestID).Scan(&id)
+	if err = s.db.QueryRowContext(r.Context(), `SELECT id,creation_digest FROM learning_attempts WHERE user_id=$1 AND request_id=$2`, userID(r.Context()), in.RequestID).Scan(&id, &previous); err != nil {
+		s.dbError(w, "create replay", err)
+		return
+	}
+	if previous.Valid && previous.String != fingerprint {
+		fail(w, 409, "同一请求标识的选题范围发生改变")
+		return
+	}
 	r.SetPathValue("id", id)
 	s.getLearningAttempt(w, r)
 }
@@ -322,21 +347,18 @@ func feedbackFor(a learningAttempt, answers map[string]string) map[string]any {
 }
 func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Answers        map[string]string       `json:"answers"`
-		Personal       bool                    `json:"personal"`
-		ModelSelection *learningModelSelection `json:"model_selection"`
+		ClientRequestID string                  `json:"client_request_id"`
+		Answers         map[string]string       `json:"answers"`
+		Personal        bool                    `json:"personal"`
+		ModelSelection  *learningModelSelection `json:"model_selection"`
 	}
-	if decodeLimit(r, &in, 120000) != nil {
+	if decodeLimit(r, &in, 120000) != nil || (in.ClientRequestID != "" && !requestIDPattern.MatchString(in.ClientRequestID)) {
 		fail(w, 400, "作答格式无效")
 		return
 	}
 	a, err := s.loadAttempt(r.Context(), r.PathValue("id"))
 	if err != nil {
 		fail(w, 404, "练习不存在或版本已更新")
-		return
-	}
-	if a.Submitted != nil {
-		respond(w, 200, a)
 		return
 	}
 	if !validateLearningAnswers(a.Question.Content, in.Answers) {
@@ -360,8 +382,19 @@ func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 		s.dbError(w, "lock attempt", err)
 		return
 	}
+	if err = bindSubmission(r.Context(), tx, userID(r.Context()), a.ID, in.ClientRequestID, payloadDigest(in)); err != nil {
+		if errors.Is(err, errSubmissionConflict) {
+			fail(w, 409, err.Error())
+		} else {
+			s.dbError(w, "submission request", err)
+		}
+		return
+	}
 	if submitted != nil {
-		tx.Rollback()
+		if err = tx.Commit(); err != nil {
+			s.dbError(w, "submission replay", err)
+			return
+		}
 		s.getLearningAttempt(w, r)
 		return
 	}
@@ -370,6 +403,21 @@ func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(old, &in.Answers)
 	}
 	feedback := feedbackFor(a, in.Answers)
+	rule, err := s.attemptRule(r.Context(), a)
+	if err != nil {
+		s.dbError(w, "load scoring rule", err)
+		return
+	}
+	if rule != nil {
+		result, e := rule.Score(a.Question.Content, in.Answers)
+		if e != nil {
+			s.dbError(w, "score approved rule", e)
+			return
+		}
+		feedback = map[string]any{"parts": result.Parts, "score": result.Score, "max_score": result.Max, "needs_ai": result.NeedsReview, "ai_reference": false, "confidence": result.Confidence, "engine_version": result.Engine}
+	} else {
+		feedback["confidence"] = "legacy"
+	}
 	if a.Question.Kind == "essay" && a.Question.Subject == "chinese" {
 		n := 0
 		for _, v := range in.Answers {
@@ -389,7 +437,10 @@ func (s *server) submitLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	feedback["timed_out"] = expired
 	raw, _ := json.Marshal(in.Answers)
 	fr, _ := json.Marshal(feedback)
-	_, err = tx.ExecContext(r.Context(), `UPDATE learning_attempts SET answers=$3,draft_answers=$3,feedback=$4,submitted_at=clock_timestamp() WHERE id=$1 AND user_id=$2`, a.ID, userID(r.Context()), string(raw), string(fr))
+	_, err = tx.ExecContext(r.Context(), `UPDATE learning_attempts SET answers=$3,draft_answers=$3,feedback=$4,submitted_at=clock_timestamp(),submission_digest=$5 WHERE id=$1 AND user_id=$2`, a.ID, userID(r.Context()), string(raw), string(fr), payloadDigest(in.Answers))
+	if err == nil && v3Enabled("SCORING") {
+		err = writeScoreEvidence(r.Context(), tx, a, in.Answers, feedback)
+	}
 	if err == nil && feedback["needs_ai"] == true {
 		kind := "grade"
 		if a.Question.Subject == "chinese" && a.Question.Kind == "essay" {

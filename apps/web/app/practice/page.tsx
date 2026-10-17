@@ -133,7 +133,8 @@ export default function Practice() {
     dirty = useRef(false),
     attemptRef = useRef<Attempt | null>(null),
     explanationRequested = useRef(""),
-    nextRequest = useRef("");
+    nextRequest = useRef(""),
+    submissionRequest = useRef("");
   answersRef.current = answers;
   attemptRef.current = attempt;
   useEffect(() => {
@@ -145,6 +146,7 @@ export default function Practice() {
     panel?.querySelector<HTMLElement>("h2,h3")?.focus({ preventScroll: true });
   }, [attempt?.id, !!attempt?.submitted_at]);
   function install(a: Attempt) {
+    if (a.id !== attemptRef.current?.id) submissionRequest.current = "";
     setSubject(a.question.subject_id);
     setKind(a.question.kind);
     setAttempt(a);
@@ -369,7 +371,9 @@ export default function Practice() {
     try {
       if (!a.deadline || Date.now() + offset.current < Date.parse(a.deadline))
         await saveDraft();
+      if (!submissionRequest.current) submissionRequest.current = requestID();
       const next = await api<Attempt>(`/learning/attempts/${a.id}/submit`, {
+        client_request_id: submissionRequest.current,
         answers: answersRef.current,
         personal,
         model_selection: modelOptions ? modelSelection : undefined,
@@ -433,6 +437,7 @@ export default function Practice() {
     }
   }
   function answer(id: string, text: string) {
+    submissionRequest.current = "";
     draftVersion.current++;
     setAnswers((v) => ({ ...v, [id]: text }));
     dirty.current = true;
