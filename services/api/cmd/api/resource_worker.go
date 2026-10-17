@@ -283,6 +283,12 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 			default:
 				result, err = s.runResourceJob(ctx, kind, raw)
 			}
+		case "model_evaluation":
+			if user.Role != "admin" {
+				err = fmt.Errorf("需要管理员权限")
+			} else {
+				result, err = s.runEvaluation(ctx, p.EvaluationID)
+			}
 		case "diagnosis":
 			result, err = s.generateDiagnosis(ctx, p)
 		case "explanation":

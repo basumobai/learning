@@ -1,4 +1,6 @@
 "use client";
+import { GuidedTutor } from "../components/GuidedTutor";
+import { ScoreEvidence } from "../components/ScoreEvidence";
 import { RecallCardCreator } from "../components/RecallCardCreator";
 import { MistakePanel } from "../components/MistakePanel";
 import { MathText } from "../components/MathText";
@@ -73,6 +75,7 @@ type Feedback = {
   }[];
 };
 type Attempt = {
+ score_evidence?: {id:string;score:number;max_score:number;confidence:string;created_at:string;engine_version:string;note:string;supersedes_id?:string}[];
   draft_version?: number;
   id: string;
   question: {
@@ -799,6 +802,8 @@ export default function Practice() {
           <>
             {submitted && <MistakePanel attemptId={attempt.id} subject={attempt.question.subject_id} />}
             {submitted && <RecallCardCreator attemptId={attempt.id} />}
+            {submitted && <ScoreEvidence evidence={attempt.score_evidence||[]} />}
+            {submitted && <GuidedTutor attemptId={attempt.id} selection={modelSelection} personal={personal} />}
             {submitted && (
               <nav className="review-jumps" aria-label="本题复习">
                 <a href="#practice-feedback">查看作答反馈</a>

@@ -119,6 +119,7 @@ func (s *server) retryLearningJob(w http.ResponseWriter, r *http.Request) {
 }
 
 type learningJobPayload struct {
+	EvaluationID     string                  `json:"evaluation_id,omitempty"`
 	PromptRevision   int                     `json:"prompt_revision"`
 	ModelSelection   *learningModelSelection `json:"model_selection"`
 	ModelFingerprint string                  `json:"model_fingerprint"`
