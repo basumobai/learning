@@ -488,13 +488,19 @@ func (s *server) returnResource(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]bool{"returned": true})
 }
 func (s *server) publishedResources(w http.ResponseWriter, r *http.Request) {
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 || offset > 1000000 {
+		offset = 0
+	}
+	query, subject := clipText(strings.TrimSpace(r.URL.Query().Get("q")), 200), r.URL.Query().Get("subject")
 	var raw json.RawMessage
-	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (SELECT d.id,d.title,d.resource_type,COALESCE(d.subject_id,'') subject_id,(SELECT count(*) FROM learning_unit_publications p WHERE p.document_id=d.id AND p.active) units FROM learning_documents d WHERE d.published_run_id IS NOT NULL ORDER BY d.updated_at DESC LIMIT 100)t`).Scan(&raw)
+	var total int
+	err := s.db.QueryRowContext(r.Context(), `WITH filtered AS (SELECT d.id,d.title,d.resource_type,COALESCE(d.subject_id,'') subject_id,d.updated_at,(SELECT count(*) FROM learning_unit_publications p WHERE p.document_id=d.id AND p.active) units FROM learning_documents d WHERE d.published_run_id IS NOT NULL AND ($1='' OR d.title ILIKE '%'||$1||'%') AND ($2='' OR d.subject_id=$2)) SELECT COALESCE((SELECT jsonb_agg(row_to_json(t)) FROM (SELECT id,title,resource_type,subject_id,units FROM filtered ORDER BY updated_at DESC,id LIMIT 25 OFFSET $3)t),'[]'),(SELECT count(*) FROM filtered)`, query, subject, offset).Scan(&raw, &total)
 	if err != nil {
 		s.dbError(w, "published resources", err)
 		return
 	}
-	respond(w, 200, map[string]any{"resources": raw})
+	respond(w, 200, map[string]any{"resources": raw, "total": total})
 }
 func (s *server) publishedResourceDetail(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))

@@ -111,6 +111,19 @@ func TestReviewedIndependentQuestionAndAttemptSnapshots(t *testing.T) {
 	if strings.Contains(library.Body.String(), "Revised reference explanation.") || strings.Contains(library.Body.String(), "human_answer_note") || strings.Contains(library.Body.String(), `"evidence"`) {
 		t.Fatal("library bypassed answer privacy")
 	}
+	list := student.call("GET", "/api/v1/resources/library?q=Review&subject=english", nil, 200)
+	var found []map[string]any
+	if e := json.Unmarshal(list["resources"], &found); e != nil || len(found) != 1 || string(list["total"]) != "1" {
+		t.Fatal("published search lost resource", list)
+	}
+	empty := student.call("GET", "/api/v1/resources/library?q=Review&subject=english&offset=25", nil, 200)
+	if string(empty["resources"]) != "[]" || string(empty["total"]) != "1" {
+		t.Fatal("published pagination lost total", empty)
+	}
+	other := student.call("GET", "/api/v1/resources/library?subject=physics", nil, 200)
+	if string(other["total"]) != "0" {
+		t.Fatal("published subject filter leaked scope", other)
+	}
 	if _, err := s.db.Exec(`UPDATE learning_question_revisions SET content='{}'`); err == nil {
 		t.Fatal("question snapshots mutable")
 	}
