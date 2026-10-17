@@ -8,6 +8,7 @@ import (
 	"example.com/els/api/internal/security"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -496,8 +497,12 @@ func (s *server) publishedResources(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"resources": raw})
 }
 func (s *server) publishedResourceDetail(w http.ResponseWriter, r *http.Request) {
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 || offset > 1000000 {
+		offset = 0
+	}
 	var raw json.RawMessage
-	err := s.db.QueryRowContext(r.Context(), `SELECT row_to_json(t) FROM (SELECT d.id,d.title,COALESCE((SELECT jsonb_agg(jsonb_build_object('unit_id',p.unit_id,'revision',p.revision,'body',p.body-'solution'-'answer_evidence'-'human_answer_note'-'verification_source','assets',CASE WHEN p.body->>'unit_kind'='question' THEN '[]'::jsonb ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'alt',a.alt,'source_page',a.source_page)) FROM learning_publication_assets a WHERE a.unit_id=p.unit_id AND a.revision=p.revision),'[]') END) ORDER BY p.published_at,p.unit_id) FROM learning_unit_publications p WHERE p.document_id=d.id AND p.active),'[]') units FROM learning_documents d WHERE d.id=$1 AND d.published_run_id IS NOT NULL)t`, r.PathValue("id")).Scan(&raw)
+	err := s.db.QueryRowContext(r.Context(), `SELECT row_to_json(t) FROM (SELECT d.id,d.title,COALESCE((SELECT jsonb_agg(jsonb_build_object('unit_id',p.unit_id,'revision',p.revision,'body',p.body-'solution'-'answer_evidence'-'human_answer_note'-'verification_source','assets',CASE WHEN p.body->>'unit_kind'='question' THEN '[]'::jsonb ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'alt',a.alt,'source_page',a.source_page)) FROM learning_publication_assets a WHERE a.unit_id=p.unit_id AND a.revision=p.revision),'[]') END) ORDER BY p.published_at,p.unit_id) FROM (SELECT * FROM learning_unit_publications WHERE document_id=d.id AND active ORDER BY published_at,unit_id LIMIT 25 OFFSET $2) p),'[]') units,(SELECT count(*) FROM learning_unit_publications WHERE document_id=d.id AND active) unit_count FROM learning_documents d WHERE d.id=$1 AND d.published_run_id IS NOT NULL)t`, r.PathValue("id"), offset).Scan(&raw)
 	if err != nil {
 		fail(w, 404, "正式资源不存在")
 		return

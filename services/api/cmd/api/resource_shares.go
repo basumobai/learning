@@ -80,7 +80,18 @@ func (s *server) shareConnector(ctx context.Context, id string) (shareConnector,
 	return c, nil
 }
 func (s *server) openListCall(ctx context.Context, c shareConnector, endpoint string, body any, out any) error {
+	fresh, err := s.shareConnector(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	c = fresh
 	raw, _ := json.Marshal(body)
+	var location struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(raw, &location) != nil || !safeMount(location.Path) || !withinMount(c.Root, location.Path) {
+		return fmt.Errorf("目录已超出当前连接授权范围")
+	}
 	r, err := http.NewRequestWithContext(ctx, "POST", c.Base+endpoint, bytes.NewReader(raw))
 	if err != nil {
 		return err
@@ -293,7 +304,10 @@ func (s *server) analyzeShare(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "需要目录快照版本")
 		return
 	}
-	id, err := s.enqueueLearning(r.Context(), "share_analyze", r.PathValue("share")+fmt.Sprint(in.Snapshot), map[string]any{"share_id": r.PathValue("share"), "snapshot": in.Snapshot})
+	_, configRevision, _ := s.processingConfig(r.Context())
+	var taskRevision int
+	_ = s.db.QueryRowContext(r.Context(), `SELECT revision FROM learning_ai_tasks WHERE task='share_prefilter'`).Scan(&taskRevision)
+	id, err := s.enqueueLearning(r.Context(), "share_analyze", r.PathValue("share")+fmt.Sprintf(":%d:%d:%d", in.Snapshot, configRevision, taskRevision), map[string]any{"share_id": r.PathValue("share"), "snapshot": in.Snapshot})
 	if err != nil {
 		s.dbError(w, "share analyze", err)
 		return
@@ -309,7 +323,14 @@ type shareMetadata struct {
 }
 
 func (s *server) analyzeShareJob(ctx context.Context, share string, snapshot int) (any, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,path,name,size FROM learning_share_files WHERE share_id=$1 AND snapshot=$2 ORDER BY path`, share, snapshot)
+	c, _, err := s.processingConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(c.ShareSeconds)*time.Second)
+	defer cancel()
+	ctx = withProcessingBudget(ctx, c.ShareTokens, c.Cost)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,path,name,size FROM learning_share_files WHERE share_id=$1 AND snapshot=$2 AND recommendation IS NULL ORDER BY path`, share, snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +345,7 @@ func (s *server) analyzeShareJob(ctx context.Context, share string, snapshot int
 	}
 	rows.Close()
 	if len(files) == 0 {
-		return nil, fmt.Errorf("目录尚未读取")
+		return map[string]any{"analyzed": 0, "cached_or_empty": true}, nil
 	}
 	models, _, err := s.taskModels(ctx, "share_prefilter", false)
 	if err != nil {
@@ -375,6 +396,24 @@ func (s *server) analyzeShareJob(ctx context.Context, share string, snapshot int
 			}
 			recommendations = append(recommendations, map[string]any{"id": x.ID, "recommend": x.Recommend})
 		}
+		for id := range known {
+			if seen[id] {
+				continue
+			}
+			tx, e := s.learningWriteTx(ctx)
+			if e != nil {
+				return nil, e
+			}
+			_, e = tx.ExecContext(ctx, `UPDATE learning_share_files SET recommendation=$2 WHERE id=$1 AND snapshot=(SELECT revision FROM learning_shares WHERE id=share_id)`, id, nullableJSON(map[string]any{"recommend": false, "reason": "系统：未获得可靠推荐，请人工确认", "source": "system"}))
+			if e == nil {
+				e = tx.Commit()
+			}
+			tx.Rollback()
+			if e != nil {
+				return nil, e
+			}
+		}
+
 		if err = s.jobProgress(ctx, map[string]int{"analyzed": min(start+80, len(files)), "total": len(files)}); err != nil {
 			return nil, err
 		}
@@ -471,10 +510,10 @@ func downloadHostAllowed(base, raw string, allowed []string) bool {
 	return false
 }
 func (s *server) downloadShareJob(ctx context.Context, importID string) (any, error) {
-	var share, connector, mount string
+	var share, connector, mount, provider string
 	var snapshot, rate int
 	var cap int64
-	err := s.db.QueryRowContext(ctx, `SELECT i.share_id,s.connection_id,s.mount_path,i.snapshot,i.bytes_per_second,i.max_bytes FROM learning_share_imports i JOIN learning_shares s ON s.id=i.share_id WHERE i.id=$1`, importID).Scan(&share, &connector, &mount, &snapshot, &rate, &cap)
+	err := s.db.QueryRowContext(ctx, `SELECT i.share_id,s.connection_id,s.mount_path,s.provider,i.snapshot,i.bytes_per_second,i.max_bytes FROM learning_share_imports i JOIN learning_shares s ON s.id=i.share_id WHERE i.id=$1`, importID).Scan(&share, &connector, &mount, &provider, &snapshot, &rate, &cap)
 	if err != nil {
 		return nil, err
 	}
@@ -522,6 +561,10 @@ func (s *server) downloadShareJob(ctx context.Context, importID string) (any, er
 		if info.Directory || info.Name != f.Name || info.Size != f.Size || version != f.Version {
 			return nil, fmt.Errorf("文件版本变化，请刷新目录并重新批准下载")
 		}
+		c, err = s.shareConnector(ctx, connector)
+		if err != nil {
+			return nil, err
+		}
 		if !downloadHostAllowed(c.Base, info.URL, c.Hosts) {
 			return nil, fmt.Errorf("下载主机未在连接白名单中，请配置授权主机")
 		}
@@ -544,11 +587,16 @@ func (s *server) downloadShareJob(ctx context.Context, importID string) (any, er
 			return nil, fmt.Errorf("下载地址无效")
 		}
 
-		client := s.client
-		if client == nil {
-			client = newProviderClient()
+		if provider == "baidu" {
+			req.Header.Set("User-Agent", "pan.baidu.com")
 		}
-		resp, e := client.Do(req)
+		baseClient := s.client
+		if baseClient == nil {
+			baseClient = newProviderClient()
+		}
+		downloadClient := *baseClient
+		downloadClient.Timeout = 15 * time.Minute
+		resp, e := downloadClient.Do(req)
 		if e != nil {
 			return nil, fmt.Errorf("网盘下载失败，可重新批准后重试")
 		}
@@ -596,7 +644,7 @@ func (s *server) downloadShareJob(ctx context.Context, importID string) (any, er
 		if read != f.Size || !bytes.HasPrefix(data, []byte("%PDF-")) || f.Hash != "" && security.Digest(string(data)) != f.Hash {
 			return nil, fmt.Errorf("文件大小、格式或哈希验证失败")
 		}
-		doc, e := s.storeRawResource(ctx, f.Name, data, nil, resourceSource{Kind: "share_" + connector, Key: share + ":" + f.Path, Name: f.Name, Version: f.Version, Metadata: map[string]any{"share_id": share, "file_id": f.ID, "snapshot": snapshot}})
+		doc, e := s.storeRawResource(ctx, f.Name, data, nil, resourceSource{Kind: "share_" + provider, Key: share + ":" + f.Path, Name: f.Name, Version: f.Version, Metadata: map[string]any{"share_id": share, "connection_id": connector, "file_id": f.ID, "snapshot": snapshot}})
 		if e != nil {
 			return nil, e
 		}

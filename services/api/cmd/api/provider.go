@@ -84,6 +84,7 @@ type aiModel struct {
 	version      string
 	jsonMode     bool
 	routeTask    string
+	budgetTask   string
 	maxOutput    int
 }
 
@@ -154,7 +155,7 @@ func (s *server) upstream(ctx context.Context, m aiModel, path string, body any,
 	if path == "/chat/completions" {
 		output := m.maxOutput
 		if output == 0 {
-			output = s.routePolicy(ctx, m.routeTask).Output
+			output = s.routePolicy(ctx, modelBudgetTask(m)).Output
 		}
 		if request, ok := body.(map[string]any); ok {
 			request["max_tokens"] = output

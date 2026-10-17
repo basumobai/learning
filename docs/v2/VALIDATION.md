@@ -93,3 +93,29 @@ P1 CI with PostgreSQL 17, race tests, browser mocks and complete Compose passed:
 - 学习资源库可浏览正式正文/专题；题目参考答案和审核私有说明不通过资源浏览接口泄露。
 - 新数据库测试：缺答案拒绝发布、人工核验后无章节题目可练习、重新发布去重、旧练习按旧答案评分、正式库答案隔离、快照不可变、真题来源/规则年份限制及知识点版本冲突/环检测。
 - 本地Go编译和前端生产构建完成；完整数据库/浏览器/Compose结果以本阶段远程CI为准。
+
+## P8：兼容、多端与集成验收
+
+- A/B/C、网盘、审核、配置和任务页新增320/390/600/834/1194/1440/1920/2560八种宽度浏览器检查；覆盖批量专题、标签修正、只下载推荐选择、单元编辑/发布和模型多选，不调用收费API。
+- 修复第六个导航入口在小屏的触控宽度，提供手机页图预览、桌面并排、原PDF范围请求和同站嵌入策略；所有新增工作台操作可在手机访问。
+- 资源/单元/正式内容分页；增加来源、教材、专题/知识点、章节和置信度筛选，以及批量专题的事务版本检查。
+- 增加旧原件迁移Worker：保留旧列与ID，原件blob去重，标记已有重复ID，不清理数据。迁移可重试。
+- 修复禁用首选模型阻断备用池；已知图像能力与上下文在调用前检查；降级调用共享费用预留。网盘预筛选有独立累计预算，已保存推荐可恢复。
+- Compose冒烟扩展到真实单PDF上传去重、任务幂等、独立Worker领取、证据不足待确认、原件不变与Web PDF对照响应头，无外部付费调用。
+- 模型测试、任务记录和旧原件迁移入口已补齐；WebDAV兼容界面不会误编辑OpenList连接。
+- 本地执行Go race（数据库测试在缺少TEST_DATABASE_URL时跳过）、前端17项单元测试、Next构建与安装器检查。数据库、浏览器和五服务Compose全量结果见PR checks；UI截图随web工作流artifact提供。
+
+### 八个核心场景的自动化对应
+
+| 场景 | 约束验证 | 测试 |
+| --- | --- | --- |
+| 教材 | 依据抽样正文识别出版社/教材，不从文件名虚构册次；深度策略独立 | `TestResourceAcceptanceContentMatrix/1_textbook`、`TestDeepStrategiesAndIncompleteDrafts` |
+| 语法专题 | 多语法主题、无教材绑定、B→C逐步解析且缺答案待审 | `.../2_grammar`、`TestDeepResumeRetainsUnitsAndAnswerUncertainty` |
+| 广东真题 | 文件名不确认真伪；实际模拟卷不误标，正式发布需来源/规则年份核验 | `.../3_exam_authenticity`、`TestExamVerificationAndConfigurationRevisions` |
+| 物理专题 | 电磁感应学科/专题及知识点，不创建教材Unit | `.../4_physics_topic` |
+| 错误文件名 | 正文数学术语覆盖英语文件名 | `.../5_wrong_filename` |
+| 混合专题 | 语法/阅读/词汇识别为综合多专题 | `.../6_mixed_topics` |
+| 网盘目录 | 快照与人工所选文件校验，仅下载批准项，凭据隔离 | `TestShareSelectionPrivacyAndImport`、`TestShareBoundaries`、浏览器选择性导入 |
+| 异常恢复 | 旧租约/取消写入围栏、重试检查点、OCR失败不强行分类、原件/去重不变 | `TestResourceLeaseFencesLateWrites`、`TestResourceScanRecoveryAndControl`、`TestOCRFailureLeavesUncertainOriginal` |
+
+以上为原创合成PDF与受控接口测试；真实指定教材、真题、AI和网盘的验收依赖见OPERATIONS.md，未标记为完成。没有生产部署或main合并。

@@ -99,14 +99,38 @@ func inputTokenBound(v any) (int, bool) {
 }
 func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int, error) {
 	bound, images := inputTokenBound(body)
-	p := s.routePolicy(ctx, m.routeTask)
+	p := s.routePolicy(ctx, modelBudgetTask(m))
+	output := p.Output
+	if m.maxOutput > 0 {
+		output = m.maxOutput
+	}
 	if bound > p.Input {
 		return bound, fmt.Errorf("输入超过任务token预算，请缩小处理范围")
+	}
+	var modalities []byte
+	var contextLength int64
+	if s.db != nil && m.ID > 0 {
+		_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(c.input_modalities,'null'),COALESCE(c.context_length,0) FROM ai_models m JOIN ai_model_catalog c ON c.provider_id=m.provider_id AND c.model_id=m.model_id WHERE m.id=$1 AND c.available`, m.ID).Scan(&modalities, &contextLength)
+		var known []string
+		if images && json.Unmarshal(modalities, &known) == nil && len(known) > 0 {
+			vision := false
+			for _, v := range known {
+				if v == "image" {
+					vision = true
+				}
+			}
+			if !vision {
+				return bound, fmt.Errorf("服务商目录显示模型不支持图像输入")
+			}
+		}
+		if contextLength > 0 && int64(bound+output) > contextLength {
+			return bound, fmt.Errorf("输入与输出预留超过模型上下文窗口")
+		}
 	}
 	budget, _ := ctx.Value(processingBudgetKey{}).(*processingBudget)
 	if budget != nil {
 		if lease, ok := ctx.Value(jobLeaseKey{}).(jobLease); ok {
-			result, err := s.db.ExecContext(ctx, `UPDATE learning_jobs SET ai_token_reserved=ai_token_reserved+$3 WHERE id=$1 AND generation=$2 AND status='running' AND NOT cancel_requested AND NOT pause_requested AND ai_token_reserved+$3<=$4`, lease.ID, lease.Generation, bound+p.Output, budget.Tokens)
+			result, err := s.db.ExecContext(ctx, `UPDATE learning_jobs SET ai_token_reserved=ai_token_reserved+$3 WHERE id=$1 AND generation=$2 AND status='running' AND NOT cancel_requested AND NOT pause_requested AND ai_token_reserved+$3<=$4`, lease.ID, lease.Generation, bound+output, budget.Tokens)
 			if err != nil {
 				return bound, err
 			}
@@ -114,7 +138,7 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 			if n != 1 {
 				return bound, fmt.Errorf("累计AI token预留达到任务预算或任务已停止")
 			}
-		} else if err := budget.reserveTokens(bound + p.Output); err != nil {
+		} else if err := budget.reserveTokens(bound + output); err != nil {
 			return bound, err
 		}
 	}
@@ -127,7 +151,7 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 	}
 	var pricing []byte
 	var unit string
-	err := s.db.QueryRowContext(ctx, `SELECT c.pricing,COALESCE(c.price_unit,'') FROM ai_models m JOIN ai_model_catalog c ON c.provider_id=m.provider_id AND c.model_id=m.model_id WHERE m.id=$1 AND c.available`, m.ID).Scan(&pricing, &unit)
+	err := s.db.QueryRowContext(ctx, `SELECT c.pricing,COALESCE(c.price_unit,'') FROM ai_models m JOIN ai_model_catalog c ON c.provider_id=m.provider_id AND c.model_id=m.model_id WHERE m.id=$1 AND c.available AND c.fetched_at>now()-interval '24 hours'`, m.ID).Scan(&pricing, &unit)
 	if err != nil || unit != "USD/token" {
 		return bound, fmt.Errorf("模型价格未知，不能验证费用预算")
 	}
@@ -140,10 +164,16 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 	if e1 != nil || e2 != nil || a < 0 || b < 0 || math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) {
 		return bound, fmt.Errorf("模型价格未提供")
 	}
-	cost := float64(bound)*a + float64(p.Output)*b
+	cost := float64(bound)*a + float64(output)*b
 	if p.Cost != nil && cost > *p.Cost {
 		return bound, fmt.Errorf("预计费用超过单次任务预算")
 	}
+	if callBudget, ok := ctx.Value(routeAttemptBudgetKey{}).(*processingBudget); ok {
+		if err := callBudget.reserveCost(cost); err != nil {
+			return bound, err
+		}
+	}
+
 	if budget != nil && budget.Cost != nil {
 		if lease, ok := ctx.Value(jobLeaseKey{}).(jobLease); ok {
 			result, err := s.db.ExecContext(ctx, `UPDATE learning_jobs SET ai_cost_reserved=ai_cost_reserved+$3 WHERE id=$1 AND generation=$2 AND status='running' AND NOT cancel_requested AND NOT pause_requested AND ai_cost_reserved+$3<=$4`, lease.ID, lease.Generation, cost, *budget.Cost)
@@ -163,9 +193,24 @@ func (s *server) checkCallBudget(ctx context.Context, m aiModel, body any) (int,
 }
 func (s *server) routedLearningCompletion(ctx context.Context, m aiModel, prompt string, content any) (string, error) {
 	if m.routeTask == "" || m.ID < 1 {
+		if m.budgetTask != "" {
+			policy := s.routePolicy(ctx, m.budgetTask)
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(policy.Timeout)*time.Second)
+			defer cancel()
+			if m.maxOutput == 0 {
+				m.maxOutput = policy.Output
+			}
+			if policy.Cost != nil {
+				ctx = context.WithValue(ctx, routeAttemptBudgetKey{}, &processingBudget{Cost: policy.Cost})
+			}
+		}
 		return s.singleLearningCompletion(ctx, m, prompt, content)
 	}
 	policy := s.routePolicy(ctx, m.routeTask)
+	if policy.Cost != nil {
+		ctx = context.WithValue(ctx, routeAttemptBudgetKey{}, &processingBudget{Cost: policy.Cost})
+	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(policy.Timeout)*time.Second)
 	defer cancel()
 	ids := []int64{m.ID}
@@ -218,7 +263,7 @@ func (s *server) recordInvocation(ctx context.Context, m aiModel, bound, limit i
 		return "", nil
 	}
 	id := security.Token(18)
-	task := m.routeTask
+	task := modelBudgetTask(m)
 	if task == "" {
 		task = "direct"
 	}
@@ -280,4 +325,13 @@ func (b *processingBudget) reserveCost(n float64) error {
 	}
 	b.Reserved += n
 	return nil
+}
+
+type routeAttemptBudgetKey struct{}
+
+func modelBudgetTask(m aiModel) string {
+	if m.routeTask != "" {
+		return m.routeTask
+	}
+	return m.budgetTask
 }

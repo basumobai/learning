@@ -85,6 +85,7 @@ func (s *server) taskPrompt(ctx context.Context, task string) string {
 func (s *server) taskModels(ctx context.Context, task string, personal bool) ([]aiModel, aiModel, error) {
 	if personal {
 		m, err := s.personalModel(ctx)
+		m.budgetTask = task
 		if err != nil {
 			return nil, m, err
 		}
@@ -110,6 +111,9 @@ func (s *server) taskModels(ctx context.Context, task string, personal bool) ([]
 	}
 	var backend, codexModel string
 	if s.db.QueryRowContext(ctx, `SELECT backend,codex_model FROM learning_ai_tasks WHERE task=$1`, task).Scan(&backend, &codexModel) == nil && backend == "codex" {
+		if ctx.Value(processingBudgetKey{}) != nil {
+			return nil, aiModel{}, fmt.Errorf("新资源流水线需要可核验预算的OpenAI兼容API模型；Codex保留用于兼容入库")
+		}
 		if account(ctx).Role != "admin" || !isPDFTask(task) || os.Getenv("LEARNING_CODEX_RUNNER_URL") == "" {
 			return nil, aiModel{}, fmt.Errorf("Codex入库服务尚未配置")
 		}
@@ -125,19 +129,30 @@ func (s *server) taskModels(ctx context.Context, task string, personal bool) ([]
 	if json.Unmarshal(raw, &ids) != nil || len(ids) == 0 {
 		return nil, aiModel{}, fmt.Errorf("请管理员配置%s的模型", learningDefaults[task].Name)
 	}
-	if task != "essay_reviewer" {
+	fallback := s.routePolicy(ctx, task).Fallback
+	if task != "essay_reviewer" && !fallback {
 		ids = ids[:1]
 	}
 	result := []aiModel{}
 	for _, id := range ids {
 		m, err := s.learningModel(ctx, id)
+		m.budgetTask = task
 		if task != "essay_reviewer" {
 			m.routeTask = task
 		}
 		if err != nil {
+			if task != "essay_reviewer" && fallback {
+				continue
+			}
 			return nil, aiModel{}, fmt.Errorf("任务模型未授权或已停用")
 		}
 		result = append(result, m)
+		if task != "essay_reviewer" {
+			break
+		}
+	}
+	if len(result) == 0 {
+		return nil, aiModel{}, fmt.Errorf("候选模型全部未授权或已停用")
 	}
 	lm := result[0]
 	if lead.Valid && task == "essay_reviewer" {

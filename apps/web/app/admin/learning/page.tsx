@@ -68,6 +68,7 @@ type WordSet = {
   approved: boolean;
 };
 type Cloud = {
+ adapter?:string;
   id: string;
   name: string;
   base_url: string;
@@ -132,7 +133,7 @@ export default function AdminLearning() {
     setModels(c.models.filter((m) => m.kind === "chat"));
     setSets(w.sets);
     setDrafts(q.questions);
-    setClouds(cc.connections);
+    setClouds(cc.connections.filter(c=>!c.adapter||c.adapter==='webdav'));
   }
   useEffect(() => {
     if (auth.allowed) {const hash=window.location.hash.slice(1);if(["documents","questions","tasks","words","cloud"].includes(hash))setTab(hash);load().catch((e) => setError(e.message));}

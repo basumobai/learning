@@ -43,6 +43,12 @@ func (s *server) saveLearningCloud(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Adapter == "" {
 		in.Adapter = "webdav"
+		if in.ID != "" {
+			var options []byte
+			if s.db.QueryRowContext(r.Context(), `SELECT adapter,options FROM learning_cloud_connections WHERE id=$1`, in.ID).Scan(&in.Adapter, &options) == nil {
+				_ = json.Unmarshal(options, &in.Options)
+			}
+		}
 	}
 	if in.Adapter != "webdav" && in.Adapter != "openlist" {
 		fail(w, 400, "连接适配器无效")

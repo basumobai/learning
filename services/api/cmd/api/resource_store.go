@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path"
@@ -115,6 +116,7 @@ func (s *server) resourceRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/v1/admin/resources/scans", s.startResourceScan)
 	m.HandleFunc("GET /api/v1/admin/resources/terms", s.resourceTerms)
 	m.HandleFunc("GET /api/v1/admin/resources/{id}/file", s.originalResource)
+	m.HandleFunc("GET /api/v1/admin/resource-previews/{id}/{page}", s.resourcePreview)
 	m.HandleFunc("PATCH /api/v1/admin/resources/{id}/tags", s.editResourceTags)
 	m.HandleFunc("GET /api/v1/admin/resources/jobs/{id}/status", s.sharedResourceJob)
 	m.HandleFunc("POST /api/v1/admin/resources/jobs/{id}/{action}", s.controlResourceJob)
@@ -147,7 +149,9 @@ func (s *server) uploadRawResource(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	respond(w, 201, map[string]any{"id": id, "stage": "A", "message": "原件已保存，可开始轻量识别"})
+	stage := "A"
+	_ = s.db.QueryRowContext(r.Context(), `SELECT stage FROM learning_documents WHERE id=$1`, id).Scan(&stage)
+	respond(w, 201, map[string]any{"id": id, "stage": stage, "message": "原件已保存，可开始轻量识别"})
 }
 func (s *server) originalResource(w http.ResponseWriter, r *http.Request) {
 	data, err := s.documentPDF(r.Context(), r.PathValue("id"), "question")
@@ -157,7 +161,8 @@ func (s *server) originalResource(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", `inline; filename="resource.pdf"`)
-	_, _ = w.Write(data)
+	w.Header().Set("ETag", `"`+security.Digest(string(data))+`"`)
+	http.ServeContent(w, r, "resource.pdf", time.Time{}, bytes.NewReader(data))
 }
 func (s *server) listResources(w http.ResponseWriter, r *http.Request) {
 	stage, subject, kind, query := r.URL.Query().Get("stage"), r.URL.Query().Get("subject"), r.URL.Query().Get("type"), r.URL.Query().Get("q")
@@ -169,20 +174,29 @@ func (s *server) listResources(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 || offset > 1000000 {
 		offset = 0
 	}
+	edition, source, term, chapter := r.URL.Query().Get("edition"), r.URL.Query().Get("source"), r.URL.Query().Get("term"), r.URL.Query().Get("chapter")
+	minimum, _ := strconv.ParseFloat(r.URL.Query().Get("confidence"), 64)
+	if minimum < 0 || minimum > 1 || math.IsNaN(minimum) || math.IsInf(minimum, 0) {
+		minimum = 0
+	}
+	duplicates := r.URL.Query().Get("duplicates") == "true"
 	var resources json.RawMessage
 	err := s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_agg(row_to_json(t)),'[]') FROM (
- SELECT d.id,d.title,COALESCE(d.subject_id,'') subject_id,d.stage,d.revision,d.resource_type,d.textbook_alignment,d.classification_status,d.classification_revision,d.classification,d.edition,d.volume,d.recognition,d.created_at,
+ SELECT d.id,d.title,COALESCE(d.subject_id,'') subject_id,d.stage,d.revision,d.resource_type,d.textbook_alignment,d.classification_status,d.classification_revision,d.classification,d.edition,d.volume,d.recognition,d.created_at,d.duplicate_of,
  COALESCE((SELECT jsonb_agg(row_to_json(x)) FROM (SELECT f.role,b.hash,b.size FROM learning_resource_files f JOIN learning_blobs b ON b.hash=f.blob_hash WHERE f.document_id=d.id) x),'[]') files,
  COALESCE((SELECT jsonb_agg(row_to_json(x)) FROM (SELECT kind,original_name,created_at FROM learning_resource_sources WHERE document_id=d.id) x),'[]') sources,
  COALESCE((SELECT jsonb_agg(row_to_json(x)) FROM (SELECT t.id,t.name,t.kind,t.subject_id FROM learning_resource_terms rt JOIN learning_terms t ON t.id=rt.term_id WHERE rt.document_id=d.id) x),'[]') terms,
+ COALESCE((SELECT jsonb_agg(subject_id) FROM learning_resource_subjects WHERE document_id=d.id),'[]') subjects,
+ COALESCE((SELECT jsonb_agg(chapter_id) FROM learning_resource_chapters WHERE document_id=d.id),'[]') chapter_ids,
  COALESCE((SELECT jsonb_agg(row_to_json(x)) FROM (SELECT id,kind,status,error,generation,attempts,progress,checkpoint,control_revision FROM learning_jobs WHERE resource_id=d.id ORDER BY created_at DESC LIMIT 5) x),'[]') jobs
- FROM learning_documents d WHERE ($1='' OR d.stage=$1) AND ($2='' OR d.subject_id=$2 OR EXISTS(SELECT 1 FROM learning_resource_subjects rs WHERE rs.document_id=d.id AND rs.subject_id=$2)) AND ($3='' OR d.resource_type=$3) AND ($4='' OR d.title ILIKE '%'||$4||'%') ORDER BY d.created_at DESC,d.id LIMIT 25 OFFSET $5) t`, stage, subject, kind, query, offset).Scan(&resources)
+ FROM learning_documents d WHERE ($11 OR d.duplicate_of IS NULL) AND ($1='' OR d.stage=$1) AND ($2='' OR d.subject_id=$2 OR EXISTS(SELECT 1 FROM learning_resource_subjects rs WHERE rs.document_id=d.id AND rs.subject_id=$2)) AND ($3='' OR d.resource_type=$3) AND ($4='' OR d.title ILIKE '%'||$4||'%') AND ($6='' OR d.edition=$6) AND ($7='' OR EXISTS(SELECT 1 FROM learning_resource_sources rs WHERE rs.document_id=d.id AND rs.kind=$7)) AND ($8='' OR EXISTS(SELECT 1 FROM learning_resource_terms rt WHERE rt.document_id=d.id AND rt.term_id=$8)) AND ($9='' OR EXISTS(SELECT 1 FROM learning_resource_chapters rc WHERE rc.document_id=d.id AND rc.chapter_id=$9)) AND COALESCE((d.classification->>'confidence')::numeric,0)>=$10
+ ORDER BY d.created_at DESC,d.id LIMIT 25 OFFSET $5) t`, stage, subject, kind, query, offset, edition, source, term, chapter, minimum, duplicates).Scan(&resources)
 	if err != nil {
 		s.dbError(w, "resource list", err)
 		return
 	}
 	var counts json.RawMessage
-	if err = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_object_agg(stage,n),'{}') FROM (SELECT stage,count(*) n FROM learning_documents GROUP BY stage) t`).Scan(&counts); err != nil {
+	if err = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(jsonb_object_agg(stage,n),'{}') FROM (SELECT stage,count(*) n FROM learning_documents WHERE duplicate_of IS NULL GROUP BY stage) t`).Scan(&counts); err != nil {
 		s.dbError(w, "resource counts", err)
 		return
 	}
@@ -200,10 +214,11 @@ type resourceTags struct {
 	Volume    string   `json:"volume"`
 	Alignment string   `json:"textbook_alignment"`
 	Confirm   bool     `json:"confirm"`
+	Chapters  []string `json:"chapter_ids"`
 }
 
 func validateResourceTags(in resourceTags) error {
-	if !validResourceType(in.Type) || in.Revision < 1 || len(in.Subjects) > 6 || len(in.Topics) > 20 || len(in.Tags) > 30 || len(in.Knowledge) > 100 || len([]rune(in.Edition)) > 80 || len([]rune(in.Volume)) > 80 {
+	if !validResourceType(in.Type) || in.Revision < 1 || len(in.Subjects) > 6 || len(in.Topics) > 20 || len(in.Tags) > 30 || len(in.Knowledge) > 100 || len(in.Chapters) > 50 || len([]rune(in.Edition)) > 80 || len([]rune(in.Volume)) > 80 {
 		return fmt.Errorf("分类字段无效")
 	}
 	if in.Alignment != "yes" && in.Alignment != "no" && in.Alignment != "unknown" {
@@ -261,7 +276,7 @@ func applyResourceTerms(ctx context.Context, tx *sql.Tx, id string, in resourceT
 	}
 	for _, term := range in.Knowledge {
 		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM learning_terms WHERE id=$1 AND kind='knowledge')`, term).Scan(&exists); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM learning_terms WHERE id=$1 AND kind='knowledge' AND (subject_id IS NULL OR subject_id=ANY($2::text[])))`, term, in.Subjects).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
@@ -271,6 +286,20 @@ func applyResourceTerms(ctx context.Context, tx *sql.Tx, id string, in resourceT
 			return err
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM learning_resource_chapters WHERE document_id=$1`, id); err != nil {
+		return err
+	}
+	for _, chapter := range in.Chapters {
+		var valid bool
+		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM learning_chapters WHERE id=$1 AND subject_id=ANY($2::text[]) AND ($3<>'yes' OR (edition=$4 AND volume=$5)))`, chapter, in.Subjects, in.Alignment, in.Edition, in.Volume).Scan(&valid)
+		if err != nil || !valid {
+			return fmt.Errorf("章节与资源学科、教材范围不匹配")
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO learning_resource_chapters(document_id,chapter_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id, chapter); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 func (s *server) editResourceTags(w http.ResponseWriter, r *http.Request) {
@@ -434,4 +463,20 @@ func (s *server) scanResources(ctx context.Context, payload []byte) (any, error)
 		return nil, err
 	}
 	return map[string]any{"processed": processed, "skipped": skipped, "resource_ids": ids}, nil
+}
+
+func (s *server) resourcePreview(w http.ResponseWriter, r *http.Request) {
+	page, _ := strconv.Atoi(r.PathValue("page"))
+	if page < 1 || page > 2000 {
+		fail(w, 400, "页码无效")
+		return
+	}
+	var data []byte
+	err := s.db.QueryRowContext(r.Context(), `SELECT image FROM learning_pages WHERE document_id=$1 AND kind='question' AND page=$2 AND octet_length(image)>0`, r.PathValue("id"), page).Scan(&data)
+	if err != nil {
+		fail(w, 409, "页面预览尚未就绪，请稍候或打开PDF原件")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	_, _ = w.Write(data)
 }

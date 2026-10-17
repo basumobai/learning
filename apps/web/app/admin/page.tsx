@@ -150,8 +150,8 @@ export default function Admin() {
       {catalogProvider&&<ProviderModelCatalog providerId={catalogProvider} onClose={()=>setCatalogProvider("")} onSaved={load}/>}
       {tab==="providers"&&!!config?.models.length&&<section className="panel glass"><h2>批量启用与停用</h2><ModelScopeSelector models={config.models.map(m=>({...m,enabled:true}))} providers={config.providers} selected={bulkModels} onChange={setBulkModels} label="批量模型管理"/><div className="segments">{[true,false].map(enabled=><button key={String(enabled)} className="quiet" disabled={busy||!bulkModels.length} onClick={()=>void run(async()=>{await api("/admin/ai/models",{ids:bulkModels,enabled},"PATCH");await load();setBulkModels([]);})}>{enabled?"启用所选":"停用所选"}</button>)}</div></section>}
       <p className="section-links">
-        <a href="/admin/learning">
-          多学科题库、PDF 与云盘入库、AI 提示词及极速四选一 →
+        <a href="/admin/resources">
+          资源管理：上传、智能分类、深度解析与审核 →
         </a>
       </p>
       <section className="intro" id="page-content" tabIndex={-1}>

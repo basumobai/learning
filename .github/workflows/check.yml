@@ -69,6 +69,14 @@ jobs:
             sleep 1
           done
           npm run test:ui
+      - name: Preserve responsive UI previews
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: learning-ui-previews
+          path: docs/previews/*.png
+          retention-days: 7
+          if-no-files-found: ignore
   integration:
     env:
       ELS_ADMIN_USERNAME: admin

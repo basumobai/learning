@@ -31,10 +31,12 @@ type processingConfig struct {
 	DeepSeconds  int      `json:"deep_seconds"`
 	Workers      int      `json:"worker_concurrency"`
 	Retries      int      `json:"retries"`
+	ShareTokens  int      `json:"share_tokens"`
+	ShareSeconds int      `json:"share_seconds"`
 }
 
 func (c processingConfig) validate() error {
-	if c.SamplePages < 1 || c.SamplePages > 12 || c.SampleChars < 500 || c.SampleChars > 40000 || c.OCRPages < 0 || c.OCRPages > c.SamplePages || c.OCRMinChars < 10 || c.OCRMinChars > 500 || c.LightSeconds < 15 || c.LightSeconds > 180 || c.LightTokens < 2000 || c.LightTokens > 100000 || math.IsNaN(c.Confidence) || c.Confidence < .5 || c.Confidence > 1 || c.Cost != nil && (*c.Cost <= 0 || *c.Cost > 100) || c.DeepPages < 1 || c.DeepPages > 2000 || c.DeepTokens < 2000 || c.DeepTokens > 4000000 || c.DeepSeconds < 60 || c.DeepSeconds > 1800 || c.Workers < 1 || c.Workers > 8 || c.Retries < 1 || c.Retries > 8 {
+	if c.ShareTokens < 2000 || c.ShareTokens > 2000000 || c.ShareSeconds < 15 || c.ShareSeconds > 600 || c.SamplePages < 1 || c.SamplePages > 12 || c.SampleChars < 500 || c.SampleChars > 40000 || c.OCRPages < 0 || c.OCRPages > c.SamplePages || c.OCRMinChars < 10 || c.OCRMinChars > 500 || c.LightSeconds < 15 || c.LightSeconds > 180 || c.LightTokens < 2000 || c.LightTokens > 100000 || math.IsNaN(c.Confidence) || c.Confidence < .5 || c.Confidence > 1 || c.Cost != nil && (*c.Cost <= 0 || *c.Cost > 100) || c.DeepPages < 1 || c.DeepPages > 2000 || c.DeepTokens < 2000 || c.DeepTokens > 4000000 || c.DeepSeconds < 60 || c.DeepSeconds > 1800 || c.Workers < 1 || c.Workers > 8 || c.Retries < 1 || c.Retries > 8 {
 		return fmt.Errorf("处理预算超出允许范围")
 	}
 	return nil
@@ -274,7 +276,7 @@ func rulesLight(pages []samplePage) (lightResult, bool) {
 			return r, false
 		}
 	}
-	indicators := map[string][]string{"english": {"relative clause", "non-finite", "subjunctive", "定语从句", "非谓语动词", "虚拟语气"}, "physics": {"电磁感应", "磁通量", "法拉第", "感应电动势"}, "math": {"导数", "抛物线", "函数", "圆锥曲线", "集合"}}
+	indicators := map[string][]string{"english": {"relative clause", "non-finite", "subjunctive", "定语从句", "非谓语动词", "虚拟语气"}, "physics": {"电磁感应", "磁通量", "法拉第", "感应电动势", "electromagnetic induction", "magnetic flux", "induced emf"}, "math": {"导数", "抛物线", "函数", "圆锥曲线", "集合", "derivative", "parabola", "integral"}}
 	detected := []string{}
 	for subject, words := range indicators {
 		hits := 0
@@ -297,19 +299,28 @@ func rulesLight(pages []samplePage) (lightResult, bool) {
 	r.Notes = "抽样正文出现多个一致的学科术语；未据文件名确认真题或教材同步。"
 	if detected[0] == "english" {
 		r.Type = "grammar_practice"
-		for _, x := range []struct{ Word, ID string }{{"定语从句", "en-relative"}, {"非谓语动词", "en-nonfinite"}, {"虚拟语气", "en-subjunctive"}, {"时态语态", "en-tense"}, {"状语从句", "en-adverbial"}} {
-			if strings.Contains(text, x.Word) {
-				r.Topics = append(r.Topics, x.Word)
-				r.Knowledge = append(r.Knowledge, x.ID)
+		for _, x := range []struct {
+			Name, ID string
+			Words    []string
+		}{
+			{"定语从句", "en-relative", []string{"定语从句", "relative clause"}}, {"非谓语动词", "en-nonfinite", []string{"非谓语动词", "non-finite"}}, {"虚拟语气", "en-subjunctive", []string{"虚拟语气", "subjunctive"}}, {"时态语态", "en-tense", []string{"时态语态", "tense and voice"}}, {"状语从句", "en-adverbial", []string{"状语从句", "adverbial clause"}},
+		} {
+			for _, word := range x.Words {
+				if strings.Contains(lower, word) {
+					r.Topics = append(r.Topics, x.Name)
+					r.Knowledge = append(r.Knowledge, x.ID)
+					break
+				}
 			}
 		}
+
 		if strings.Contains(lower, "reading comprehension") || strings.Contains(text, "阅读理解") || strings.Contains(text, "词汇专项") {
 			r.Type = "comprehensive"
 			r.Multi = true
 			r.Topics = append(r.Topics, "阅读/词汇")
 		}
 	}
-	if detected[0] == "physics" && strings.Contains(text, "电磁感应") {
+	if detected[0] == "physics" && (strings.Contains(text, "电磁感应") || strings.Contains(lower, "electromagnetic induction")) {
 		r.Topics = []string{"电磁感应"}
 		r.Knowledge = []string{"physics-induction"}
 	}
@@ -444,11 +455,30 @@ func (s *server) classifyResource(ctx context.Context, payload []byte) (any, err
 			return nil, err
 		}
 	}
+	for _, p := range pages {
+		if p.Source == "ocr_failed" {
+			result.Notes += "；部分抽样OCR失败，需人工核对或配置OCR模型"
+			break
+		}
+	}
 	result.Authenticity = "unverified"
 	if len(result.Evidence) == 0 || len(result.Subjects) == 0 {
 		result.Confidence = min(result.Confidence, .49)
 	}
-	if result.Alignment == "yes" && (len(result.Subjects) != 1 || platform.ValidateCurriculum(result.Subjects[0], result.Edition, result.Volume) != nil) {
+	editionEvidence := result.Edition == ""
+	volumeEvidence := result.Volume == ""
+	for _, e := range result.Evidence {
+		if strings.Contains(e.Quote, result.Edition) && result.Edition != "" {
+			editionEvidence = true
+		}
+		if result.Edition == platform.EnglishEdition && (strings.Contains(e.Quote, "北师大") || strings.Contains(e.Quote, "Beijing Normal")) && strings.Contains(e.Quote, "2019") {
+			editionEvidence = true
+		}
+		if result.Volume != "" && strings.Contains(e.Quote, result.Volume) {
+			volumeEvidence = true
+		}
+	}
+	if result.Alignment == "yes" && (!editionEvidence || !volumeEvidence || len(result.Subjects) != 1 || platform.ValidateCurriculum(result.Subjects[0], result.Edition, result.Volume) != nil) {
 		result.Confidence = min(result.Confidence, .5)
 		result.Notes += "；教材版本或册次需确认"
 	}

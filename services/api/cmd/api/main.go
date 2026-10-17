@@ -62,7 +62,7 @@ func main() {
 		}
 		if os.Args[1] == "worker-health" {
 			var alive bool
-			if s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM learning_worker_heartbeats WHERE updated_at>now()-interval '45 seconds')`).Scan(&alive) != nil || !alive {
+			if s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM learning_worker_heartbeats WHERE updated_at>now()-interval '45 seconds' AND split_part(id,':',1)=$1)`, workerHost()).Scan(&alive) != nil || !alive {
 				os.Exit(1)
 			}
 			return
@@ -228,6 +228,7 @@ func (s *server) routes() http.Handler {
 	s.deepRoutes(mux)
 	s.reviewRoutes(mux)
 	s.curriculumRoutes(mux)
+	s.resourceOperationRoutes(mux)
 	s.learningRoutes(mux)
 	return s.protect(mux)
 }

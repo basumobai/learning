@@ -19,6 +19,10 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        source: "/api/v1/admin/resources/:id/file",
+        headers: [{key:"Content-Security-Policy",value:"frame-ancestors 'self'; object-src 'none'; base-uri 'self'"}],
+      },
     ];
   },
 };

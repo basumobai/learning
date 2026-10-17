@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"example.com/els/api/internal/security"
@@ -22,7 +23,9 @@ type jobLease struct {
 type jobLeaseKey struct{}
 
 var errStaleJob = errors.New("任务已取消、暂停或资源版本已改变")
-var processWorkerID = security.Token(18)
+var processWorkerID = workerHost() + ":" + security.Token(18)
+
+func workerHost() string { host, _ := os.Hostname(); return host }
 
 // Lock resource first, then lease. Tag edits use the same lock order. A late
 // worker can never commit an intermediate page/question after losing its lease.
@@ -69,7 +72,7 @@ func (s *server) jobProgress(ctx context.Context, progress any) error {
 	if !ok {
 		return nil
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE learning_jobs SET progress=$3,updated_at=now() WHERE id=$1 AND generation=$2 AND status='running' AND NOT cancel_requested AND NOT pause_requested`, j.ID, j.Generation, nullableJSON(progress))
+	result, err := s.db.ExecContext(ctx, `UPDATE learning_jobs SET progress=$3,updated_at=now() WHERE id=$1 AND generation=$2 AND status='running' AND NOT cancel_requested AND NOT pause_requested AND EXISTS(SELECT 1 FROM users u WHERE u.id=owner_id AND NOT u.disabled AND NOT u.must_change_password AND (queue='interactive' OR u.role='admin'))`, j.ID, j.Generation, nullableJSON(progress))
 	if err != nil {
 		return err
 	}
@@ -246,7 +249,7 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 	}
 	if err == nil {
 		switch kind {
-		case "identify", "outline", "ocr", "extract", "word_options", "resource_scan", "resource_classify", "resource_deep", "resource_publish", "share_inspect", "share_analyze", "share_download":
+		case "identify", "outline", "ocr", "extract", "word_options", "resource_scan", "resource_classify", "resource_deep", "resource_publish", "resource_migrate", "share_inspect", "share_analyze", "share_download":
 			if user.Role != "admin" {
 				err = fmt.Errorf("需要管理员权限")
 				break
@@ -309,6 +312,8 @@ func (s *server) runResourceJob(ctx context.Context, kind string, raw []byte) (a
 		return s.analyzeShareJob(ctx, p.Share, p.Snapshot)
 	case "share_download":
 		return s.downloadShareJob(ctx, p.Import)
+	case "resource_migrate":
+		return s.migrateLegacyOriginals(ctx)
 	case "resource_scan":
 		return s.scanResources(ctx, raw)
 	case "resource_classify":

@@ -76,3 +76,33 @@ with urlopen('http://127.0.0.1:3000/', timeout=15) as response:
 assert api('/learning/catalog')['region'] == '广东'
 assert len(api('/learning/catalog')['subjects']) == 6
 print('Complete stack smoke test passed: scheduling, feedback, retry, undo, authenticated web, scheduling, feedback, retry, undo, three text question types, Next.js.')
+
+# Exercise the real API/Redis/Worker path without external AI credentials.
+from pathlib import Path
+import time
+pdf = (Path(__file__).resolve().parent.parent / 'services/api/cmd/api/testdata/questions.pdf').read_bytes()
+boundary = 'LearningSmoke' + uuid.uuid4().hex
+multipart = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="smoke.pdf"\r\nContent-Type: application/pdf\r\n\r\n'.encode() + pdf + f'\r\n--{boundary}--\r\n'.encode())
+def upload_original():
+    req = Request(BASE + '/admin/resources/uploads', data=multipart, headers={'Content-Type': 'multipart/form-data; boundary=' + boundary, 'X-ELS-Client': 'web', 'X-CSRF-Token': csrf})
+    with opener.open(req, timeout=20) as response:
+        assert response.status == 201
+        return json.load(response)['id']
+resource = upload_original()
+assert upload_original() == resource, 'same original created a duplicate resource'
+job = api('/admin/resources/' + resource + '/classify', {'revision': 1}, 202)['job_id']
+assert api('/admin/resources/' + resource + '/classify', {'revision': 1}, 202)['job_id'] == job
+for _ in range(40):
+    status = api('/admin/resources/jobs/' + job + '/status')['job']
+    if status['status'] in ['completed', 'failed']:
+        break
+    time.sleep(.5)
+assert status['status'] == 'completed', status
+listed = api('/admin/resources?q=smoke.pdf')['resources']
+assert len(listed) == 1 and listed[0]['classification_status'] == 'needs_confirmation'
+assert api('/admin/runtime')['worker_online'], 'separate worker heartbeat missing'
+with opener.open('http://127.0.0.1:3000/api/v1/admin/resources/' + resource + '/file', timeout=20) as response:
+    assert response.read() == pdf, 'worker changed original PDF'
+    assert "frame-ancestors 'self'" in response.headers['Content-Security-Policy'], 'same-site PDF comparison blocked'
+    assert response.headers['Content-Type'].startswith('application/pdf')
+print('Learning v2 resource smoke passed: upload dedupe, queue idempotency, separate worker, uncertainty, immutable original and PDF comparison headers; no paid AI calls.')

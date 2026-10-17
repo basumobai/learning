@@ -19,11 +19,15 @@ func (s *server) enqueueLearning(ctx context.Context, kind, key string, payload 
 	return id, err
 }
 func (s *server) learningJob(w http.ResponseWriter, r *http.Request) {
-	var kind, status, message string
+	var kind, status, message, queue string
 	var payload, result []byte
-	err := s.db.QueryRowContext(r.Context(), `SELECT kind,status,error,payload,result FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&kind, &status, &message, &payload, &result)
+	err := s.db.QueryRowContext(r.Context(), `SELECT kind,status,error,payload,result,queue FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&kind, &status, &message, &payload, &result, &queue)
 	if err != nil {
 		fail(w, 404, "任务不存在")
+		return
+	}
+	if queue != "interactive" && account(r.Context()).Role != "admin" {
+		fail(w, 403, "需要管理员权限")
 		return
 	}
 	if kind == "explanation" {
@@ -59,9 +63,13 @@ func (s *server) retryLearningJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var raw []byte
-	var kind string
-	if err := s.db.QueryRowContext(r.Context(), `SELECT payload,kind FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&raw, &kind); err != nil {
+	var kind, queue string
+	if err := s.db.QueryRowContext(r.Context(), `SELECT payload,kind,queue FROM learning_jobs WHERE id=$1 AND owner_id=$2`, r.PathValue("id"), userID(r.Context())).Scan(&raw, &kind, &queue); err != nil {
 		fail(w, 404, "任务不存在")
+		return
+	}
+	if queue != "interactive" && account(r.Context()).Role != "admin" {
+		fail(w, 403, "需要管理员权限")
 		return
 	}
 	if kind == "explanation" && (in.ModelSelection != nil || in.Personal != nil) {
