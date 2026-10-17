@@ -1,4 +1,6 @@
 "use client";
+import { SyntaxLab } from "../components/SyntaxLab";
+import { ListeningReflection } from "../components/ListeningReflection";
 import { AdaptivePanel } from "../components/AdaptivePanel";
 import { useMemo } from "react";
 import { TimelinePlayer } from "../components/TimelinePlayer";
@@ -400,110 +402,7 @@ export default function Assistant() {
           </div>
         </section>
       )}
-      {tab === "sentence" && (
-        <>
-          <section className="panel glass">
-            <h2>把长句拆开看</h2>
-            <form className="form-stack" onSubmit={generate}>
-              <label>
-                英语原句
-                <textarea
-                  value={sentence}
-                  onChange={(e) => setSentence(e.target.value)}
-                  rows={4}
-                  maxLength={4000}
-                  placeholder="例如：The book that you lent me yesterday helped me understand the problem."
-                  required
-                  disabled={busy || !!pending}
-                />
-              </label>
-              <button
-                className="primary"
-                disabled={
-                  busy || !!pending || !selectedModel || !sentence.trim()
-                }
-              >
-                {busy ? "正在分析句子…" : "拆解这句话"}
-              </button>
-            </form>
-          </section>
-          {analysis && lesson?.data && (
-            <section className="panel glass sentence-analysis">
-              <h2 lang="en">{lesson.data.text}</h2>
-              <p>{analysis.translation}</p>
-              <div className="main-clause">
-                <span>先找主干</span>
-                <strong>{analysis.main_clause}</strong>
-              </div>
-              <div className="sentence-chunks">
-                {analysis.chunks.map((c, i) => (
-                  <article key={i}>
-                    <span>{c.role}</span>
-                    <h3 lang="en">{c.text}</h3>
-                    <p>{c.explanation}</p>
-                  </article>
-                ))}
-              </div>
-              <h3>连接与语法</h3>
-              <ul>
-                {analysis.grammar.map((g, i) => (
-                  <li key={i}>{g}</li>
-                ))}
-              </ul>
-              <h3>换成更容易的英语</h3>
-              <p lang="en">{analysis.paraphrase}</p>
-              <VoicePicker config={voice} />
-              <button
-                className="quiet"
-                disabled={!voice.model || speech.busy}
-                onClick={() =>
-                  speech.play("/ai/speech", {
-                    ...voice.body,
-                    input: lesson.data!.text,
-                  })
-                }
-              >
-                听原句
-              </button>
-              <AudioOutput player={speech} />
-              <div className="understanding-check">
-                <h3>确认自己读懂了</h3>
-                <p>{analysis.check.question}</p>
-                <button
-                  className="quiet"
-                  onClick={() => setShowCheck(!showCheck)}
-                >
-                  {showCheck ? "收起答案" : "查看参考答案"}
-                </button>
-                {showCheck && (
-                  <p>
-                    {analysis.check.answer}
-                    <br />
-                    {analysis.check.explanation}
-                  </p>
-                )}
-              </div>
-              {showCheck && dynamicSentence && (
-                <button
-                  className="quiet"
-                  onClick={() => setShowSentenceDemo((v) => !v)}
-                >
-                  {showSentenceDemo ? "收起动态演示" : "没理解，动态演示"}
-                </button>
-              )}
-              {showCheck && showSentenceDemo && dynamicSentence && (
-                <div>
-                  <h3>答错或没理解？跟着标注重新看。</h3>
-                  <TimelinePlayer timeline={dynamicSentence} />
-                </div>
-              )}
-              <p className="setting-note">
-                AI 生成的讲解，遇到疑点可以复制到辅导对话继续核对。
-              </p>
-            </section>
-          )}
-        </>
-      )}
+      {tab === "sentence" && <><SyntaxLab modelId={selectedModel?.id||0} />{lesson?.kind==="sentence"&&lesson.data&&<details className="panel glass"><summary>以前保存的参考分析</summary><p>{lesson.data.text}</p><p>{lesson.data.analysis.translation}</p><p>{lesson.data.analysis.main_clause}</p><p>可复制原句到上方重新独立拆句。</p></details>}</>}
       {tab === "listening" && (
         <>
           <section className="panel glass">
@@ -665,6 +564,7 @@ export default function Assistant() {
                 </button>
               ) : (
                 <div className="transcript">
+ <ListeningReflection trainingId={lesson.id} />
                   <h3>
                     本次 {lesson.score} / {lesson.questions?.length} ·
                     原文与译文

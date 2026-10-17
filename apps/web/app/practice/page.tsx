@@ -797,7 +797,7 @@ export default function Practice() {
         )}
         {attempt && (
           <>
-            {submitted && <MistakePanel attemptId={attempt.id} />}
+            {submitted && <MistakePanel attemptId={attempt.id} subject={attempt.question.subject_id} />}
             {submitted && <RecallCardCreator attemptId={attempt.id} />}
             {submitted && (
               <nav className="review-jumps" aria-label="本题复习">

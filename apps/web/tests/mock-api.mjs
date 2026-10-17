@@ -213,6 +213,9 @@ export async function installMockAPI(context, options = {}) {
       data = { answer: "先看helped的主语，再暂时遮住that从句。" };
     else if (p === "/learning/attempts/attempt1") data = attempt();
     else if (p === "/learning/attempts/attempt1/mistakes") data = {types:[{id:"sentence_core",name:"句子主干"}],candidates:[],events:[]};
+    else if (p === "/learning/english/syntax") data = {id:"syntax1",text:body.text,analysis:null,attempts:[]};
+    else if (p === "/learning/english/syntax/syntax1/attempt") data = {saved:true};
+    else if (p === "/learning/english/syntax/syntax1/reveal") data = {id:"syntax1",text:question.content.passage,attempts:[{marks:[],translation:"你借给我的书帮助了我。"}],analysis:{translation:"你借给我的书帮助了我。",main_clause:"The book helped me.",chunks:[{text:"The book",role:"主语",explanation:"书帮助了我"}],grammar:["定语从句"],paraphrase:"Your book helped me.",check:{question:"什么帮助了我？",answer:"那本书",explanation:"book是主语"}}};
     else if (p === "/learning/words/next") {
       round++;
       difficulty = body.difficulty;
