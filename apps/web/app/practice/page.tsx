@@ -993,6 +993,8 @@ export default function Practice() {
               <MistakePanel
                 attemptId={attempt.id}
                 subject={attempt.question.subject_id}
+                selection={modelOptions ? modelSelection : undefined}
+                personal={personal}
               />
             )}
             {submitted && <RecallCardCreator attemptId={attempt.id} />}

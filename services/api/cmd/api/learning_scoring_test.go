@@ -20,6 +20,7 @@ func TestV3ScoringIdempotencyAndHistory(t *testing.T) {
 	if _, err := s.db.Exec(`UPDATE learning_questions SET content=$2,solution=$3 WHERE id=$1`, q, nullableJSON(content), nullableJSON(sol)); err != nil {
 		t.Fatal(err)
 	}
+	admin.call("POST", "/api/v1/admin/learning/questions/"+q+"/scoring-rules", map[string]any{"question_revision": 2, "rule": platform.ScoringRule{Parts: []platform.ScoringPart{{ID: "1", Mode: "choice", Accepted: []string{"B"}}}}, "source_revision": "contradictory fixture should fail"}, 400)
 	rule := platform.ScoringRule{Parts: []platform.ScoringPart{{ID: "1", Mode: "choice", Accepted: []string{"A,C"}, SubsetPoints: 2}}}
 	admin.call("POST", "/api/v1/admin/learning/questions/"+q+"/scoring-rules", map[string]any{"question_revision": 2, "rule": rule, "source_revision": "synthetic fixture verified by test teacher"}, 201)
 	input := map[string]any{"subject_id": "math", "kind": "multiple_choice", "request_id": "v3-create-test"}

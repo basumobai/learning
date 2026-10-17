@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api, requestID } from "../../lib/api";
+import type { ModelSelection } from "./LearningModelPicker";
 type Candidate = {
   id: string;
   type_id: string;
@@ -17,15 +18,20 @@ type Data = {
 export function MistakePanel({
   attemptId,
   subject,
+  selection,
+  personal,
 }: {
   attemptId: string;
   subject?: string;
+  selection?: ModelSelection;
+  personal?: boolean;
 }) {
   const [data, setData] = useState<Data | null>(null),
     [type, setType] = useState(""),
     [note, setNote] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [diagnosisJob, setDiagnosisJob] = useState(""),
     [notice, setNotice] = useState("");
   const load = () =>
     api<Data>(`/learning/attempts/${attemptId}/mistakes`).then((d) => {
@@ -43,8 +49,60 @@ export function MistakePanel({
   useEffect(() => {
     setData(null);
     setError("");
+    setDiagnosisJob("");
     void load().catch((e) => setError(e.message));
   }, [attemptId]);
+  useEffect(() => {
+    if (!diagnosisJob) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      try {
+        const job = await api<{ status: string; error?: string }>(
+          `/learning/jobs/${diagnosisJob}`,
+        );
+        if (!active) return;
+        if (job.status === "completed") {
+          await load();
+          if (!active) return;
+          setNotice("分析已完成；候选需要你核对。没有可靠证据时不会生成候选。");
+          setDiagnosisJob("");
+        } else if (job.status === "failed") {
+          setError(job.error || "分析暂未完成，可稍后重试或手工记录。");
+          setDiagnosisJob("");
+        } else timer = setTimeout(() => void poll(), 1800);
+      } catch (e) {
+        if (active) {
+          setError((e as Error).message);
+          setDiagnosisJob("");
+        }
+      }
+    }
+    void poll();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [diagnosisJob, attemptId]);
+  async function diagnose() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ id: string }>(
+        `/learning/attempts/${attemptId}/diagnosis`,
+        { personal: !!personal, model_selection: selection },
+      );
+      const job = await api<{ status: string }>(`/learning/jobs/${result.id}`);
+      if (job.status === "failed")
+        await api(`/learning/jobs/${result.id}/retry`, {});
+      setDiagnosisJob(result.id);
+      setNotice("正在核对原题与作答，稍后会显示可确认的候选。");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function record(action: string, candidate?: Candidate) {
     setBusy(true);
     setError("");
@@ -95,6 +153,9 @@ export function MistakePanel({
       <p className="setting-note">
         AI 候选需要你确认。原题做对与新题验证分别记录。
       </p>
+      <button disabled={busy || !!diagnosisJob} onClick={() => void diagnose()}>
+        {diagnosisJob ? "正在分析错因…" : "请 AI 提供错因候选"}
+      </button>
       {error && (
         <p role="alert" className="error">
           {error}

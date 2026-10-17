@@ -525,7 +525,7 @@ try {
   await firstLogin.context.close();
   assert.deepEqual(failures, []);
   console.log(
-    `Device UI: ${checks} checks passed across 8 viewports, touch/keyboard, rotation, viewport keyboard and draft navigation (mock API).`,
+    `Device UI: ${checks} checks passed across ${configurations.length} viewports, touch/keyboard, rotation, viewport keyboard and draft navigation (mock API).`,
   );
 } catch (error) {
   if (debugPage && !debugPage.isClosed())
