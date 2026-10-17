@@ -484,9 +484,12 @@ try {
       .getByRole("navigation", { name: "主要导航" })
       .getByRole("link")
       .count(),
-    4,
+    5,
   );
   checks++;
+  assert.equal(await learner.page.getByRole("navigation", {name:"主要导航"}).getByRole("link", {name:"资源",exact:true}).count(),1);
+  assert.equal(await learner.page.getByRole("navigation", {name:"主要导航"}).getByRole("link", {name:"管理",exact:true}).count(),0);
+  checks+=2;
   await learner.context.close();
   const firstLogin = await contextFor(
     { name: "first-login", width: 834, height: 1112, touch: true },

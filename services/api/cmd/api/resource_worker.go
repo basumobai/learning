@@ -188,6 +188,10 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 	if _, err = claim.ExecContext(parent, `SELECT pg_advisory_xact_lock(783219)`); err != nil {
 		return err
 	}
+	if _, err = claim.ExecContext(parent, `UPDATE learning_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' WHEN pause_requested THEN 'paused' ELSE 'failed' END,error=CASE WHEN cancel_requested OR pause_requested THEN error ELSE '任务连续中断达到自动尝试上限；检查点保留，可手动恢复' END,generation=generation+1,lease_until=NULL,lease_owner=NULL,updated_at=now() WHERE status IN ('running','pause_requested','cancel_requested') AND COALESCE(lease_until,updated_at+interval '12 minutes')<now() AND attempts>=max_attempts`); err != nil {
+		return err
+	}
+
 	if queue == "resource" {
 		var running, maximum int
 		err = claim.QueryRowContext(parent, `SELECT (SELECT count(*) FROM learning_jobs WHERE queue='resource' AND status IN ('running','pause_requested','cancel_requested') AND lease_until>now()),(config->>'worker_concurrency')::integer FROM learning_processing_config WHERE id`).Scan(&running, &maximum)
@@ -199,7 +203,7 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 		}
 	}
 	err = claim.QueryRowContext(parent, `UPDATE learning_jobs SET status='running',generation=generation+1,attempts=attempts+1,lease_owner=$2,lease_until=now()+interval '90 seconds',heartbeat_at=now(),updated_at=now()
- WHERE id=(SELECT id FROM learning_jobs WHERE ($1='' OR queue=$1) AND
+ WHERE id=(SELECT candidate.id FROM learning_jobs candidate WHERE ($1='' OR queue=$1) AND (resource_id IS NULL OR NOT EXISTS(SELECT 1 FROM learning_jobs active WHERE active.resource_id=candidate.resource_id AND active.id<>candidate.id AND active.status IN ('running','pause_requested','cancel_requested') AND active.lease_until>now())) AND
  ((status IN ('queued','retry_wait') AND retry_at<=now()) OR (status IN ('running','cancel_requested','pause_requested') AND COALESCE(lease_until,updated_at+interval '12 minutes')<now()))
  ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1)
  RETURNING id,owner_id,kind,payload,generation,COALESCE(resource_id,''),COALESCE(resource_revision,0),pause_requested,cancel_requested,attempts,max_attempts`, queue, processWorkerID).Scan(&id, &owner, &kind, &raw, &generation, &resource, &resourceRevision, &pause, &cancelled, &attempts, &maximum)
@@ -258,8 +262,14 @@ func (s *server) processLearningJobQueue(parent context.Context, queue string) e
 			case "identify":
 				result, err = s.identifyPDF(ctx, p.DocumentID)
 			case "outline":
+				if _, err = s.learningExec(ctx, `UPDATE learning_documents SET stage=CASE WHEN published_run_id IS NOT NULL THEN 'library' ELSE 'C' END WHERE id=$1`, p.DocumentID); err != nil {
+					break
+				}
 				result, err = s.outlinePDF(ctx, p.DocumentID)
 			case "ocr":
+				if _, err = s.learningExec(ctx, `UPDATE learning_documents SET stage=CASE WHEN published_run_id IS NOT NULL THEN 'library' ELSE 'C' END WHERE id=$1`, p.DocumentID); err != nil {
+					break
+				}
 				result, err = s.recognizePDF(ctx, p.DocumentID)
 			case "extract":
 				result, err = s.extractPDF(ctx, p)

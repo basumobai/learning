@@ -69,6 +69,7 @@ func TestLightClassificationNeverPreparesWholePDF(t *testing.T) {
 	if stage != "A" {
 		t.Fatal("uncertain document auto-classified", stage)
 	}
+	raw, _ = json.Marshal(resourceRequest{Document: id, Revision: 2})
 	out, err := s.classifyResource(ctx, raw)
 	if err != nil || !strings.Contains(stringMustJSON(out), `"cached":true`) {
 		t.Fatal("classification cache unused", out, err)

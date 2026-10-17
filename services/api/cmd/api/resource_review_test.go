@@ -108,7 +108,7 @@ func TestReviewedIndependentQuestionAndAttemptSnapshots(t *testing.T) {
 		t.Fatal("republish duplicated questions", count)
 	}
 	library := student.raw("GET", "/api/v1/resources/library/"+doc, nil, 200)
-	if strings.Contains(library.Body.String(), "Revised reference explanation.") || strings.Contains(library.Body.String(), "human_answer_note") {
+	if strings.Contains(library.Body.String(), "Revised reference explanation.") || strings.Contains(library.Body.String(), "human_answer_note") || strings.Contains(library.Body.String(), `"evidence"`) {
 		t.Fatal("library bypassed answer privacy")
 	}
 	if _, err := s.db.Exec(`UPDATE learning_question_revisions SET content='{}'`); err == nil {

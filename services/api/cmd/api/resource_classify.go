@@ -138,6 +138,10 @@ func (s *server) queueResourceTask(w http.ResponseWriter, r *http.Request, kind 
 	key := fmt.Sprint(rev) + ":" + security.Digest(string(config)+string(models))
 	if in.Force {
 		key += ":" + security.Token(12)
+		if _, err = tx.ExecContext(r.Context(), `UPDATE learning_jobs SET cancel_requested=true,status=CASE WHEN status IN ('queued','retry_wait','paused') THEN 'cancelled' ELSE 'cancel_requested' END,generation=generation+1 WHERE resource_id=$1 AND kind=$2 AND status IN ('queued','running','retry_wait','paused','pause_requested')`, in.Document, kind); err != nil {
+			s.dbError(w, "replace resource task", err)
+			return
+		}
 	}
 	var id string
 	err = tx.QueryRowContext(r.Context(), `SELECT id FROM learning_jobs WHERE resource_id=$1 AND kind=$2 AND dedupe_key=$3`, in.Document, kind, key).Scan(&id)
@@ -371,6 +375,10 @@ func (s *server) classifyResource(ctx context.Context, payload []byte) (any, err
 		return nil, err
 	}
 	var title string
+	var currentRevision int
+	if err = s.db.QueryRowContext(ctx, `SELECT revision FROM learning_documents WHERE id=$1`, in.Document).Scan(&currentRevision); err != nil || currentRevision != in.Revision {
+		return nil, errStaleJob
+	}
 	var taskRev int
 	s.db.QueryRowContext(ctx, `SELECT title FROM learning_documents WHERE id=$1`, in.Document).Scan(&title)
 	s.db.QueryRowContext(ctx, `SELECT revision FROM learning_ai_tasks WHERE task='classify_document'`).Scan(&taskRev)
@@ -496,7 +504,11 @@ func (s *server) classifyResource(ctx context.Context, payload []byte) (any, err
 	if len(result.Subjects) > 0 {
 		subject = result.Subjects[0]
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE learning_documents SET subject_id=$2,resource_type=$3,textbook_alignment=$4,edition=$5,volume=$6,classification=$7,classification_status=$8,stage=CASE WHEN stage='library' THEN stage ELSE $9 END,classification_revision=classification_revision+1,exam_region=$10,exam_year=$11,updated_at=now() WHERE id=$1`, in.Document, subject, result.Type, result.Alignment, result.Edition, result.Volume, nullableJSON(result), state, stage, result.Region, result.Year)
+	_, err = tx.ExecContext(ctx, `UPDATE learning_documents SET subject_id=$2,resource_type=$3,textbook_alignment=$4,edition=$5,volume=$6,classification=$7,classification_status=$8,stage=CASE WHEN stage='library' THEN stage ELSE $9 END,revision=revision+1,classification_revision=classification_revision+1,exam_region=$10,exam_year=$11,updated_at=now() WHERE id=$1`, in.Document, subject, result.Type, result.Alignment, result.Edition, result.Volume, nullableJSON(result), state, stage, result.Region, result.Year)
+	lease, _ := ctx.Value(jobLeaseKey{}).(jobLease)
+	if err == nil {
+		_, err = tx.ExecContext(ctx, `UPDATE learning_jobs SET cancel_requested=true,status=CASE WHEN status IN ('queued','retry_wait','paused') THEN 'cancelled' ELSE 'cancel_requested' END,generation=generation+1 WHERE resource_id=$1 AND id<>$2 AND status IN ('queued','running','retry_wait','paused','pause_requested')`, in.Document, lease.ID)
+	}
 	// AI can only attach existing, subject-compatible knowledge IDs.
 	validKnowledge := []string{}
 	for _, id := range result.Knowledge {
@@ -513,7 +525,7 @@ func (s *server) classifyResource(ctx context.Context, payload []byte) (any, err
 		if in.Force {
 			cache += ":" + security.Token(8)
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO learning_classifications(id,document_id,resource_revision,cache_key,result,source) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(document_id,cache_key) DO NOTHING`, security.Token(18), in.Document, in.Revision, cache, nullableJSON(result), strategy)
+		_, err = tx.ExecContext(ctx, `INSERT INTO learning_classifications(id,document_id,resource_revision,cache_key,result,source) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(document_id,cache_key) DO NOTHING`, security.Token(18), in.Document, in.Revision+1, cache, nullableJSON(result), strategy)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -521,5 +533,5 @@ func (s *server) classifyResource(ctx context.Context, payload []byte) (any, err
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"stage": stage, "classification": result, "cached": cached, "sampled_pages": len(pages), "total_pages": totalPages, "ocr_pages": ocrCount}, nil
+	return map[string]any{"stage": stage, "revision": in.Revision + 1, "classification": result, "cached": cached, "sampled_pages": len(pages), "total_pages": totalPages, "ocr_pages": ocrCount}, nil
 }

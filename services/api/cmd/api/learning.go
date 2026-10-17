@@ -199,7 +199,11 @@ func (s *server) startLearningAttempt(w http.ResponseWriter, r *http.Request) {
 	}
 	var qid string
 	var rev int
-	err = s.db.QueryRowContext(r.Context(), `SELECT q.id,q.revision FROM learning_questions q LEFT JOIN learning_chapters c ON c.id=q.chapter_id WHERE q.status='published' AND q.subject_id=$1 AND q.kind=$2 AND (cardinality($3::text[])=0 OR q.chapter_id=ANY($3::text[]) OR EXISTS(SELECT 1 FROM learning_question_chapters qc WHERE qc.question_id=q.id AND qc.chapter_id=ANY($3::text[]))) AND ($4='' OR c.textbook=$4) AND ($5='' OR c.term=$5) AND ($7='' OR c.edition=$7) AND ($8='' OR c.volume=$8) ORDER BY (SELECT count(*) FROM learning_attempts a WHERE a.user_id=$6 AND a.question_id=q.id),random() LIMIT 1`, in.Subject, in.Kind, in.Chapters, in.Textbook, in.Term, userID(r.Context()), in.Edition, in.Volume).Scan(&qid, &rev)
+	err = s.db.QueryRowContext(r.Context(), `SELECT q.id,q.revision FROM learning_questions q WHERE q.status='published' AND q.subject_id=$1 AND q.kind=$2 AND (
+ (cardinality($3::text[])=0 AND $4='' AND $5='' AND $7='' AND $8='') OR EXISTS(
+ SELECT 1 FROM learning_chapters c WHERE (c.id=q.chapter_id OR EXISTS(SELECT 1 FROM learning_question_chapters qc WHERE qc.question_id=q.id AND qc.chapter_id=c.id))
+ AND (cardinality($3::text[])=0 OR c.id=ANY($3::text[])) AND ($4='' OR c.textbook=$4) AND ($5='' OR c.term=$5) AND ($7='' OR c.edition=$7) AND ($8='' OR c.volume=$8)))
+ ORDER BY (SELECT count(*) FROM learning_attempts a WHERE a.user_id=$6 AND a.question_id=q.id),random() LIMIT 1`, in.Subject, in.Kind, in.Chapters, in.Textbook, in.Term, userID(r.Context()), in.Edition, in.Volume).Scan(&qid, &rev)
 	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, 404, "这个范围还没有已审核题目，请管理员导入并发布")
 		return

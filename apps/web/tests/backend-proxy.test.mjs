@@ -65,3 +65,5 @@ test("outage returns a safe error without retries; the next request recovers", a
     globalThis.fetch = old;
   }
 });
+
+test('PDF byte ranges and validators survive the authenticated proxy', async()=>{const old=globalThis.fetch;try{globalThis.fetch=async(url,init)=>{assert.equal(init.headers.get('range'),'bytes=0-3');assert.equal(init.headers.get('if-range'),'"immutable-hash"');return new Response('%PDF',{status:206,headers:{'Content-Type':'application/pdf','Content-Range':'bytes 0-3/100','Accept-Ranges':'bytes'}})};const result=await proxyBackend(new Request('http://localhost:3000/api/v1/admin/resources/resource/file',{headers:{Range:'bytes=0-3','If-Range':'"immutable-hash"'}}));assert.equal(result.status,206);assert.equal(result.headers.get('content-range'),'bytes 0-3/100');assert.equal(await result.text(),'%PDF')}finally{globalThis.fetch=old}});

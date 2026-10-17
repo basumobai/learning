@@ -91,7 +91,15 @@ def upload_original():
 resource = upload_original()
 assert upload_original() == resource, 'same original created a duplicate resource'
 job = api('/admin/resources/' + resource + '/classify', {'revision': 1}, 202)['job_id']
-assert api('/admin/resources/' + resource + '/classify', {'revision': 1}, 202)['job_id'] == job
+replay_request = Request(BASE + '/admin/resources/' + resource + '/classify', data=json.dumps({'revision': 1}).encode(), headers={'Content-Type': 'application/json', 'X-ELS-Client': 'web', 'X-CSRF-Token': csrf})
+try:
+    with opener.open(replay_request, timeout=15) as response:
+        assert json.load(response)['job_id'] == job
+except HTTPError as error:
+    assert error.code == 409, (error.code, error.read())
+    current = api('/admin/resources?q=smoke.pdf')['resources'][0]
+    assert current['revision'] == 2 and current['classification_status'] == 'needs_confirmation'
+
 for _ in range(40):
     status = api('/admin/resources/jobs/' + job + '/status')['job']
     if status['status'] in ['completed', 'failed']:
@@ -106,3 +114,8 @@ with opener.open('http://127.0.0.1:3000/api/v1/admin/resources/' + resource + '/
     assert "frame-ancestors 'self'" in response.headers['Content-Security-Policy'], 'same-site PDF comparison blocked'
     assert response.headers['Content-Type'].startswith('application/pdf')
 print('Learning v2 resource smoke passed: upload dedupe, queue idempotency, separate worker, uncertainty, immutable original and PDF comparison headers; no paid AI calls.')
+
+request = Request('http://127.0.0.1:3000/api/v1/admin/resources/' + resource + '/file', headers={'Range': 'bytes=0-3'})
+with opener.open(request, timeout=20) as response:
+    assert response.status == 206 and response.read() == b'%PDF'
+print('PDF byte-range proxy smoke passed.')

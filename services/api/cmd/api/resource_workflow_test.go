@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -131,3 +132,71 @@ func TestResourceScanRecoveryAndControl(t *testing.T) {
 }
 
 func TestAllRoutesRegisterWithoutAmbiguity(t *testing.T) { _ = (&server{}).routes() }
+
+func TestClassificationAndForceQueueInvalidateOlderWork(t *testing.T) {
+	s, _, _ := learningTestServer(t)
+	admin := curriculumAdmin(t, s)
+	ctx := context.WithValue(context.Background(), identityKey{}, identity{ID: "teacher", Role: "admin"})
+	pdf, _ := os.ReadFile("testdata/questions.pdf")
+	id, err := s.storeRawResource(ctx, "Versioned.pdf", pdf, nil, resourceSource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := admin.call("POST", "/api/v1/admin/resources/"+id+"/classify", map[string]any{"revision": 1}, 202)
+	old := rawString(first, "job_id")
+	s.db.Exec(`UPDATE learning_jobs SET status='running',generation=1,lease_until=now()+interval '90 seconds' WHERE id=$1`, old)
+	fresh := admin.call("POST", "/api/v1/admin/resources/"+id+"/classify", map[string]any{"revision": 1, "force": true}, 202)
+	if rawString(fresh, "job_id") == old {
+		t.Fatal("forced task reused old job")
+	}
+	stale := context.WithValue(ctx, jobLeaseKey{}, jobLease{old, 1, id, 1})
+	if tx, e := s.learningWriteTx(stale); !errors.Is(e, errStaleJob) {
+		if tx != nil {
+			tx.Rollback()
+		}
+		t.Fatal("superseded task could write", e)
+	}
+	if _, e := s.db.Exec(`UPDATE learning_jobs SET status='cancelled',lease_until=NULL WHERE resource_id=$1`, id); e != nil {
+		t.Fatal(e)
+	}
+	deep, err := s.enqueueLearning(ctx, "resource_deep", "old-analysis", resourceRequest{Document: id, Revision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.db.Exec(`UPDATE learning_jobs SET status='running',generation=1,lease_until=now()+interval '90 seconds' WHERE id=$1`, deep)
+	if _, e := s.classifyResource(ctx, []byte(`{"document_id":"`+id+`","revision":1}`)); e != nil {
+		t.Fatal(e)
+	}
+	var revision int
+	s.db.QueryRow(`SELECT revision FROM learning_documents WHERE id=$1`, id).Scan(&revision)
+	if revision != 2 {
+		t.Fatal("AI classification did not version metadata", revision)
+	}
+	stale = context.WithValue(ctx, jobLeaseKey{}, jobLease{deep, 1, id, 1})
+	if tx, e := s.learningWriteTx(stale); !errors.Is(e, errStaleJob) {
+		if tx != nil {
+			tx.Rollback()
+		}
+		t.Fatal("analysis of obsolete classification could write", e)
+	}
+}
+func TestWorkerSerializesSameResource(t *testing.T) {
+	s, _, _ := learningTestServer(t)
+	ctx := context.WithValue(context.Background(), identityKey{}, identity{ID: "teacher", Role: "admin"})
+	pdf, _ := os.ReadFile("testdata/questions.pdf")
+	id, err := s.storeRawResource(ctx, "Serialize.pdf", pdf, nil, resourceSource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.enqueueLearning(ctx, "resource_deep", "first", resourceRequest{Document: id, Revision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.db.Exec(`UPDATE learning_jobs SET status='running',lease_until=now()+interval '90 seconds' WHERE id=$1`, first)
+	if _, err = s.enqueueLearning(ctx, "resource_classify", "second", resourceRequest{Document: id, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.processLearningJobQueue(ctx, "resource"); err != sql.ErrNoRows {
+		t.Fatal("same resource ran concurrently", err)
+	}
+}

@@ -42,7 +42,7 @@ P1 CI with PostgreSQL 17, race tests, browser mocks and complete Compose passed:
 - 新工作台提供A/B/C/正式库阶段、筛选、分页、上传、增量扫描、人工多维分类与任务控制。独立专题无需教材Unit。
 - Worker独立Compose服务；PostgreSQL租约/代次与Redis通知配合。Redis不可用时数据库轮询恢复；暂停、取消和旧代次写入校验覆盖中间写入。
 - 新增数据库测试：去重/原件不可改删、无教材专题、权限与版本冲突、暂停恢复、过期租约重领、重复扫描。
-- 本地Go编译/无数据库测试、前端17项单元测试及Next生产构建通过。数据库与浏览器结果以本阶段远程CI为准。
+- 本地Go编译/无数据库测试、前端18项单元测试及Next生产构建通过。数据库与浏览器结果以本阶段远程CI为准。
 - P2远程CI：API数据库、安装器和Compose通过；浏览器脚本遗留重复密码框断言已在P3修正。
 
 ## P4：有界内容抽样与多维分类
@@ -103,7 +103,7 @@ P1 CI with PostgreSQL 17, race tests, browser mocks and complete Compose passed:
 - 修复禁用首选模型阻断备用池；已知图像能力与上下文在调用前检查；降级调用共享费用预留。网盘预筛选有独立累计预算，已保存推荐可恢复。
 - Compose冒烟扩展到真实单PDF上传去重、任务幂等、独立Worker领取、证据不足待确认、原件不变与Web PDF对照响应头，无外部付费调用。
 - 模型测试、任务记录和旧原件迁移入口已补齐；WebDAV兼容界面不会误编辑OpenList连接。
-- 本地执行Go race（数据库测试在缺少TEST_DATABASE_URL时跳过）、前端17项单元测试、Next构建与安装器检查。数据库、浏览器和五服务Compose全量结果见PR checks；UI截图随web工作流artifact提供。
+- 本地执行Go race（数据库测试在缺少TEST_DATABASE_URL时跳过）、前端18项单元测试、Next构建与安装器检查。数据库、浏览器和五服务Compose全量结果见PR checks；UI截图随web工作流artifact提供。
 
 ### 八个核心场景的自动化对应
 
@@ -119,3 +119,12 @@ P1 CI with PostgreSQL 17, race tests, browser mocks and complete Compose passed:
 | 异常恢复 | 旧租约/取消写入围栏、重试检查点、OCR失败不强行分类、原件/去重不变 | `TestResourceLeaseFencesLateWrites`、`TestResourceScanRecoveryAndControl`、`TestOCRFailureLeavesUncertainOriginal` |
 
 以上为原创合成PDF与受控接口测试；真实指定教材、真题、AI和网盘的验收依赖见OPERATIONS.md，未标记为完成。没有生产部署或main合并。
+
+
+### 最终一致性复核
+
+- AI分类结果也推进资源revision，并取消使用旧分类版本的解析/发布任务；强制重跑使旧任务代次失效；同一资源不同时执行两个后台任务。
+- 旧双PDF入口的自动识别同样改为有界抽样，全文OCR只在确认后的C区处理；旧教材确认同步新的分类/阶段/版本。
+- 代理保留PDF Range/If-Range，新增范围请求单元与完整栈冒烟；学生导航新增资源入口后同步触控和角色断言。
+- 题目筛选允许辅助章节匹配教材范围；同一个章节必须同时满足册次与所选ID，防止跨册Unit串题，新增数据库回归。
+- 前端单元测试增加至18项；本地Go race、vet、Next构建、15项安装器和2项Codex兼容测试通过，数据库及浏览器最终结果以PR checks为准。
