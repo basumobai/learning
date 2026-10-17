@@ -149,7 +149,10 @@ for (const level of ["普通", "绝望"]) {
 }
 await page.goto(base + "/assistant#sentence");
 await page.getByLabel("英语原句").fill(question.content.passage);
-await page.getByRole("button", { name: "拆解这句话", exact: true }).click();
+await page.getByRole("button", { name: "开始独立拆句", exact: true }).click();
+await page.getByLabel("我的翻译").fill("你借给我的书帮助了我。");
+assert.equal(await page.locator(".sentence-analysis").count(), 0);
+await page.getByRole("button", { name: "提交尝试并看反馈", exact: true }).click();
 await page.locator(".sentence-analysis").waitFor();
 assert.equal(await page.locator(".timeline-player").count(), 0);
 checks++;

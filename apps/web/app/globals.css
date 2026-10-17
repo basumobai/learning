@@ -4107,3 +4107,5 @@ body:has(.figure-dialog[open]) {
 
 .evidence-card {padding:16px 0;border-bottom:1px solid var(--border,rgba(128,128,128,.2));overflow-wrap:anywhere}
 .evidence-card:last-child {border-bottom:0}.evidence-panel {margin-block:20px}.button-row {display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-block:16px}.button-row small {display:block;font-size:.75em}.evidence-panel label {display:grid;gap:8px;margin-block:12px}.evidence-panel input,.evidence-panel select {width:100%;min-width:0}.recall-answer {white-space:pre-wrap;overflow-wrap:anywhere}
+
+.syntax-tokens {display:flex;flex-wrap:wrap;gap:6px;margin-block:16px}.syntax-tokens button {white-space:normal;overflow-wrap:anywhere;max-width:100%;min-height:44px;padding:8px 10px;font:inherit}.syntax-tokens .marked-token {background:rgba(245,193,62,.3)}.syntax-lab label {display:grid;gap:8px;margin-block:12px}.syntax-lab textarea,.syntax-lab select {width:100%;min-width:0}.syntax-lab .sentence-analysis {margin-block:16px}
